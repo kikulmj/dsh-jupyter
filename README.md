@@ -1,11 +1,12 @@
 # dsh-jupyter
 
-Jupyter notebook 编辑 / 运行 + Web 终端的 dsh 插件（profile bundle 层安装，不改 dsh 源码）。
+Jupyter notebook 编辑 / 运行 + Web 终端的 dsh 插件。
 
 ## 功能
 
 - **Notebook**：右侧预览面板点击 `.ipynb` 打开，编辑 code/markdown/raw 单元格、增删移动、保存回磁盘；单元格由宿主真实 Jupyter 内核（`jupyter_client`）执行，输出流式渲染（文本 / HTML / 图片 / JSON / 错误），支持中断与重启内核。
-- **终端**：左侧边栏「终端」入口（New Session 下方，dsh-ssh 同款设计）展开中间列面板——node-pty 真实 PTY（TERM=xterm-256color）+ xterm.js，**透明磨砂玻璃**风格；支持清屏 / 重启 / 关闭，关闭面板不销毁 shell。
+- **终端**：左侧边栏「终端」入口（New Session 下方）展开中间列面板——node-pty 真实 PTY（TERM=xterm-256color）+ xterm.js，支持清屏 / 重启 / 关闭，关闭面板不销毁 shell。
+  
 
 ## 安装
 
