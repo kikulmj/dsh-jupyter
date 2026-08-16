@@ -6,6 +6,9 @@ Jupyter notebook 编辑 / 运行 + Web 终端的 dsh 插件。
 
 - **Notebook**：右侧预览面板点击 `.ipynb` 打开，编辑 code/markdown/raw 单元格、增删移动、保存回磁盘；单元格由宿主真实 Jupyter 内核（`jupyter_client`）执行，输出流式渲染（文本 / HTML / 图片 / JSON / 错误），支持中断与重启内核。
 - **终端**：左侧边栏「终端」入口（New Session 下方）展开中间列面板——node-pty 真实 PTY（TERM=xterm-256color）+ xterm.js，支持清屏 / 重启 / 关闭，关闭面板不销毁 shell。
+  <img width="2877" height="1627" alt="image" src="https://github.com/user-attachments/assets/95fb2d5e-56da-4daf-9832-728b0221c4da" />
+
+
   
 
 ## 安装
