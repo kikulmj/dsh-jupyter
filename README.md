@@ -1,35 +1,23 @@
 # dsh-jupyter
 
-Jupyter notebook 编辑 / 运行 + Web 终端的 dsh 插件（profile bundle 层安装，不改 dsh 源码）。
+Jupyter notebook 编辑 / 运行 + Web 终端的 dsh 插件（profile bundle 层安装）。
 
 ## 功能
 
 - **Notebook**：右侧预览面板点击 `.ipynb` 打开，编辑 code/markdown/raw 单元格、增删移动、保存回磁盘；单元格由宿主真实 Jupyter 内核（`jupyter_client`）执行，输出流式渲染（文本 / HTML / 图片 / JSON / 错误），支持中断与重启内核。
-- **终端**：左侧边栏「终端」入口（New Session 下方，dsh-ssh 同款设计）展开中间列面板——node-pty 真实 PTY（TERM=xterm-256color）+ xterm.js，**透明磨砂玻璃**风格；复制 / 粘贴走标准键盘快捷键，支持清屏 / 重启 / 关闭，关闭面板不销毁 shell。
-  <img width="2877" height="1627" alt="终端面板" src="https://github.com/user-attachments/assets/95fb2d5e-56da-4daf-9832-728b0221c4da" />
-
-## 终端键盘快捷键
-
-复制 / 粘贴没有工具栏按钮，**全部走键盘**（浏览器原生剪贴板路径，不依赖权限）：
-
-| 按键 | 行为 |
-| --- | --- |
-| `Ctrl+C` / `Cmd+C` | 有文本选区 → 复制选区；无选区 → 照常发送 SIGINT 中断前台命令 |
-| `Ctrl+Shift+C` / `Cmd+Shift+C` | 复制选区（无选区时吞掉，避免误触浏览器快捷键） |
-| `Ctrl+V` / `Cmd+V` / `Ctrl+Shift+V` | 从系统剪贴板粘贴，绝不进入 shell（`^V`） |
-
-- 右键 / 触控板双指点击只抑制浏览器菜单，**不会粘贴**。
-- 选中文本后双击是 xterm 原生单词选择，与粘贴无关。
-- 工具栏仅保留：清屏、重启会话、关闭面板。
+  <img width="2878" height="1639" alt="屏幕截图 2026-08-16 171747" src="https://github.com/user-attachments/assets/1295bedb-cc96-4386-99b2-d6b0f0fec579" />
+  
+- **终端**：左侧边栏「终端」入口（New Session 下方）展开中间列面板——node-pty 真实 PTY（TERM=xterm-256color）+ xterm.js，复制 / 粘贴走标准键盘快捷键，支持清屏 / 重启 / 关闭，关闭面板不销毁 shell。
+  <img width="2878" height="1624" alt="屏幕截图 2026-08-16 171612" src="https://github.com/user-attachments/assets/bb2a7969-1aca-4519-86ab-3ae38745fd2c" />
 
 ## 安装
 
 远程（GitHub）：
 
 ```sh
-dsh plugin --profile web add github:kikulmj/dsh-jupyter#master
+dsh plugin --profile web add github:kikulmj/dsh-jupyter
 # 或完整 URL：
-dsh plugin --profile web add git+https://github.com/kikulmj/dsh-jupyter.git#master
+dsh plugin --profile web add git+https://github.com/kikulmj/dsh-jupyter.git
 ```
 
 本地开发（指向本地仓库，改代码 → `pnpm build` → 刷新即生效）：
@@ -38,7 +26,7 @@ dsh plugin --profile web add git+https://github.com/kikulmj/dsh-jupyter.git#mast
 dsh plugin --profile web add link:/path/to/dsh-jupyter
 ```
 
-> 远端默认分支 `main` 是占位（仅 LICENSE）；插件代码在 `master` 分支，故显式指定 `#master`。构建产物（`lib/`）已随仓库提交，远端安装无需本机构建。
+> 构建产物（`lib/`）已随仓库提交，远端安装无需本机构建。
 >
 > **首次安装需放行 node-pty 原生构建**（pnpm 11 默认阻止依赖的 build 脚本）：第一次执行后 dsh 会在 `~/.dsh/profiles/web/pnpm-workspace.yaml` 自动预写 `allowBuilds: { node-pty: set this to true or false }`，把它改成 `node-pty: true`，再重跑同一条安装命令（node-pty 将本地编译，约 10 秒）。安装完成后重启 `dsh web` 生效。
 >
@@ -65,7 +53,7 @@ curl -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3080/dsh-terminal/xterm.c
 
 1. 进入任意项目会话。
 2. **Notebook**：右侧 Explorer 点击 `.ipynb`，`Shift+Enter` 运行单元格。
-3. **终端**：左侧边栏「终端」入口；shell 初始目录为当前项目根，`cd` 任意；复制 / 粘贴用上表快捷键。
+3. **终端**：左侧边栏「终端」入口；shell 初始目录为当前项目根.
 
 ## 开发
 
