@@ -38,7 +38,7 @@ const POLL_MS = 300
 function projectRootOf(ctx: ClientContext): string {
   const snapshot = ctx.sessions.list.getSnapshot()
   const sessionId = snapshot.current as string | undefined
-  const cwd = sessionId === undefined ? undefined : snapshot.byId[sessionId]?.cwd
+  const cwd = sessionId === undefined ? undefined : (snapshot.byId as Record<string, { cwd?: string } | undefined>)[sessionId]?.cwd
   return typeof cwd === 'string' && cwd !== '' ? cwd : ''
 }
 

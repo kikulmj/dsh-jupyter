@@ -232,6 +232,19 @@ html[data-dsh-terminal-active]:not([data-dsh-taskboard-active]):not([data-dsh-ss
   border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent);
 }
 
+.dst-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.dst-icon-btn:disabled:hover {
+  background: rgba(127, 127, 127, 0.12);
+  background: color-mix(in srgb, var(--dsw-alias-bg-layer-2) 55%, transparent);
+  color: var(--dsw-alias-label-secondary);
+  border-color: rgba(127, 127, 127, 0.2);
+  border-color: color-mix(in srgb, var(--dsw-alias-border-l2) 65%, transparent);
+}
+
 /* --- terminal body (frosted pane) ------------------------------------------- */
 
 .dst-term-body {

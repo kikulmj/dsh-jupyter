@@ -68,6 +68,8 @@ export function TerminalPanel({ controller, api, root }: TerminalPanelProps) {
   const sessionIdRef = useRef<string | null>(null)
   const streamRef = useRef<TerminalStream | null>(null)
   const dimsRef = useRef<{ cols: number; rows: number }>({ cols: 80, rows: 24 })
+  /** Disposables bound to the live xterm instance (selection sub, DOM listeners). */
+  const cleanupRef = useRef<Array<() => void>>([])
 
   useEffect(() => { ensureXtermCss() }, [])
 
@@ -84,7 +86,7 @@ export function TerminalPanel({ controller, api, root }: TerminalPanelProps) {
 
   /**
    * Tear down the current session: abort the stream, kill the PTY, dispose
-   * xterm. Safe to call when nothing is live.
+   * xterm + per-instance listeners. Safe to call when nothing is live.
    */
   const teardown = useCallback(async () => {
     streamRef.current?.cancel()
@@ -93,10 +95,50 @@ export function TerminalPanel({ controller, api, root }: TerminalPanelProps) {
       await api.kill(sessionIdRef.current).catch(() => {})
       sessionIdRef.current = null
     }
+    for (const dispose of cleanupRef.current.splice(0)) {
+      try { dispose() } catch { /* already gone */ }
+    }
     termRef.current?.dispose()
     termRef.current = null
     fitRef.current = null
   }, [api])
+
+  /**
+   * Legacy copy fallback: hidden textarea + execCommand('copy') where the
+   * async clipboard API is unavailable or its permission was denied.
+   */
+  const legacyCopy = useCallback((text: string): void => {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.setAttribute('readonly', '')
+    ta.style.position = 'fixed'
+    ta.style.left = '0'
+    ta.style.top = '0'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } catch {
+      console.warn('[dsh-jupyter] copy failed')
+    }
+    ta.remove()
+  }, [])
+
+  /**
+   * Copy the current xterm selection to the system clipboard.
+   */
+  const handleCopy = useCallback(() => {
+    const term = termRef.current
+    if (term === null) return
+    const text = term.getSelection()
+    if (text === '') return
+    if (navigator.clipboard?.writeText !== undefined) {
+      navigator.clipboard.writeText(text).catch(() => { legacyCopy(text) })
+    } else {
+      legacyCopy(text)
+    }
+  }, [legacyCopy])
 
   /**
    * Spin up a fresh session: create the xterm Terminal, open it, fit, create
@@ -151,6 +193,64 @@ export function TerminalPanel({ controller, api, root }: TerminalPanelProps) {
     termRef.current = term
     fitRef.current = fit
     setStatus('connecting')
+
+    // Bind clipboard + focus behavior to the live xterm instance.
+    const container = containerRef.current
+    // xterm's own keydown path swallows Ctrl/Cmd(+Shift)+V, preventDefaults
+    // it and sends a literal ^V to the shell. Returning false here makes xterm
+    // skip the key entirely so the browser can run its NATIVE paste action —
+    // which then fires a `paste` event (with readable clipboardData) that the
+    // capture-phase onPaste below turns into a terminal paste.
+    term.attachCustomKeyEventHandler((event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
+        return false
+      }
+      return true
+    })
+    const onMouseDown = (): void => { term.focus() }
+    const onContextMenu = (event: MouseEvent): void => {
+      // Suppress the browser menu; right-click / two-finger tap NEVER pastes
+      // (copy/paste lives on Ctrl/Cmd+C/V and the toolbar buttons only).
+      event.preventDefault()
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      // Ctrl/Cmd(+Shift)+C: copy the selection. Runs in the capture phase, so
+      // it is seen before xterm's own handler can act on the combo. A bare
+      // Ctrl+C with no selection is left untouched and reaches the shell as
+      // SIGINT; with Shift it is swallowed even without a selection so browser
+      // shortcuts like Firefox devtools never fire.
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+        if (event.shiftKey || term.hasSelection()) {
+          event.preventDefault()
+          event.stopPropagation()
+          if (term.hasSelection()) handleCopy()
+        }
+      }
+    }
+    const onPaste = (event: ClipboardEvent): void => {
+      // Native paste (Ctrl/Cmd+V, Ctrl+Shift+V, context-menu paste): the
+      // clipboard text is available synchronously on the event, no async
+      // permission involved — feed it straight into the terminal and stop the
+      // event so nothing else (xterm textarea, page) also handles it.
+      const text = event.clipboardData?.getData('text/plain')
+      if (typeof text !== 'string' || text === '') return
+      event.preventDefault()
+      event.stopPropagation()
+      term.paste(text)
+    }
+    // Capture phase: our handlers run before xterm's own (target-phase)
+    // listeners, so the terminal can never swallow or double-process these.
+    container.addEventListener('mousedown', onMouseDown, true)
+    container.addEventListener('contextmenu', onContextMenu, true)
+    container.addEventListener('keydown', onKeyDown, true)
+    container.addEventListener('paste', onPaste, true)
+    cleanupRef.current.push(
+      () => container.removeEventListener('mousedown', onMouseDown, true),
+      () => container.removeEventListener('contextmenu', onContextMenu, true),
+      () => container.removeEventListener('keydown', onKeyDown, true),
+      () => container.removeEventListener('paste', onPaste, true),
+    )
+    term.focus()
 
     const created = await api.create(root, term.cols, term.rows)
     if (!created.ok) {
