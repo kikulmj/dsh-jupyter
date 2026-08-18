@@ -410,14 +410,17 @@ function CellCard({
               autoFocus={autoFocus}
               onChange={(source) => onEdit(source)}
               onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                // Shift+Enter renders the markdown cell back to preview
+                // (Jupyter muscle memory; replaces the old Ctrl/Cmd+Enter).
+                if (event.shiftKey && event.key === 'Enter') {
                   event.preventDefault()
                   onToggleEditing()
                 }
               }}
             />
           ) : (
-            <div className="dshj-md">
+            // Double-click the rendered markdown to jump back into edit mode.
+            <div className="dshj-md" onDoubleClick={onToggleEditing}>
               <div className="dshj-md-body" dangerouslySetInnerHTML={{ __html: mdHtml }} />
             </div>
           )
