@@ -17,9 +17,12 @@
 
 /** The full stylesheet text injected once on mount. */
 export const TERMINAL_PANEL_CSS = `
-/* --- center-column takeover (global rules, attribute-scoped) ----------------- */
+/* --- center-column takeover (global rules, scoped to the plugin's own
+       data attributes; the column is matched by data-pane — ≤0.1.0-rc.6 —
+       or by a css-module class containing "centerCol" — 0.1.0-rc.7+, which
+       dropped the attribute) ----------------------------------------------- */
 
-[data-pane='conversation'] {
+[data-pane='conversation'], [class*='centerCol'] {
   position: relative;
 }
 

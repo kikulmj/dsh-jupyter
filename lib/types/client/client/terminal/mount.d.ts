@@ -3,11 +3,11 @@
  *
  * The `conversation` slot is single-occupant (ui-conversation) and external
  * plugins cannot declare slots, so the panel takes over the center column at
- * the DOM level: a container is appended inside the `[data-pane="conversation"]`
- * grid item (an extra trailing child React never manages), and a stylesheet
- * rule hides the conversation content while the panel is active. Toggling is
- * a data attribute on <html> — no React involvement, so the conversation
- * subtree underneath stays mounted and stateful.
+ * the DOM level: a container is appended inside the conversation column — an
+ * extra trailing child React never manages — and a stylesheet rule hides the
+ * conversation content while the panel is active. Toggling is a data
+ * attribute on <html> — no React involvement, so the conversation subtree
+ * underneath stays mounted and stateful.
  *
  * Cross-plugin exclusivity (ssh / task board): opening this panel evicts the
  * siblings both by removing their activation attributes and by dispatching

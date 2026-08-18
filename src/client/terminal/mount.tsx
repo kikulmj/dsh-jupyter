@@ -3,11 +3,11 @@
  *
  * The `conversation` slot is single-occupant (ui-conversation) and external
  * plugins cannot declare slots, so the panel takes over the center column at
- * the DOM level: a container is appended inside the `[data-pane="conversation"]`
- * grid item (an extra trailing child React never manages), and a stylesheet
- * rule hides the conversation content while the panel is active. Toggling is
- * a data attribute on <html> — no React involvement, so the conversation
- * subtree underneath stays mounted and stateful.
+ * the DOM level: a container is appended inside the conversation column — an
+ * extra trailing child React never manages — and a stylesheet rule hides the
+ * conversation content while the panel is active. Toggling is a data
+ * attribute on <html> — no React involvement, so the conversation subtree
+ * underneath stays mounted and stateful.
  *
  * Cross-plugin exclusivity (ssh / task board): opening this panel evicts the
  * siblings both by removing their activation attributes and by dispatching
@@ -25,7 +25,16 @@ import { TerminalPanel } from './panel.tsx'
 /** The injected panel container (kept in the DOM, hidden when inactive). */
 export const PANEL_VIEW_SELECTOR = '[data-dsh-terminal-view]'
 
-const CONVERSATION_COLUMN_SELECTOR = '[data-pane="conversation"]'
+/**
+ * Center-column selector, kept dual-generation:
+ * - shells ≤ 0.1.0-rc.6 stamp `data-pane="conversation"` on the column;
+ * - shells ≥ 0.1.0-rc.7 dropped the attribute — the column is now a css-module
+ *   class whose name contains `centerCol` (e.g. `.pI_x6G_centerCol`).
+ * querySelector resolves the first match, so both generations mount; the two
+ * can never coexist in one shell, and the old attribute keeps priority.
+ * (Mirrors the sidebar-root fallback in sidebar-entry.tsx.)
+ */
+const CONVERSATION_COLUMN_SELECTOR = '[data-pane="conversation"], [class*="centerCol"]'
 const ACTIVE_ATTR = 'data-dsh-terminal-active'
 /** Sibling panels' activation attributes (ssh + task board), removed when this panel opens. */
 const OTHER_ACTIVE_ATTRS = ['data-dsh-taskboard-active', 'data-dsh-ssh-active']

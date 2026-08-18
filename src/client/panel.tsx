@@ -55,12 +55,16 @@ export function NotebookPanel({
   const [statusError, setStatusError] = useState(false)
   const [saving, setSaving] = useState(false)
   const runSeq = useRef(0)
+  /** The id of the most recently added cell — drives auto-focus into the fresh
+   *  textarea so typing can start immediately (Jupyter-style). */
+  const lastAddedIdRef = useRef<string | null>(null)
 
   // Open the requested notebook; a path change reloads it.
   useEffect(() => {
     if (root === '' || path === null || path === '') {
       setNotebook(null)
       setRuntime({})
+      lastAddedIdRef.current = null
       return
     }
     let cancelled = false
@@ -78,6 +82,7 @@ export function NotebookPanel({
       setKernelState('idle')
       setStatus('')
       setStatusError(false)
+      lastAddedIdRef.current = null
     })
     return () => {
       cancelled = true
@@ -176,12 +181,14 @@ export function NotebookPanel({
 
   /** Add a cell after the given index. */
   const addCell = useCallback((afterIndex: number, cellType: NbCell['cell_type']): void => {
+    const cellId = `cell-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    lastAddedIdRef.current = cellId
     setNotebook((prev) => (prev === null ? prev : {
       ...prev,
       cells: [
         ...prev.cells.slice(0, afterIndex + 1),
         {
-          id: `cell-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+          id: cellId,
           cell_type: cellType,
           source: '',
           execution_count: null,
@@ -192,7 +199,13 @@ export function NotebookPanel({
         ...prev.cells.slice(afterIndex + 1),
       ],
     }))
-  }, [])
+    // A freshly added cell must STAY in edit mode. Markdown cards otherwise
+    // fall back to preview as soon as the source is non-empty, which flips
+    // the card right after the very first keystroke (runtime.editing is never
+    // pinned, so the empty-source fallback vanishes on the first character).
+    // Pin editing:true so typing is continuous until the user toggles.
+    patchRuntime(cellId, { editing: true })
+  }, [patchRuntime])
 
   /** Delete one cell. */
   const deleteCell = useCallback((cellId: string): void => {
@@ -252,6 +265,7 @@ export function NotebookPanel({
           total={notebook?.cells.length ?? 0}
           runtime={rt}
           root={root}
+          autoFocus={cell.id === lastAddedIdRef.current}
           onEdit={(source) => editCell(cell.id, source)}
           onRun={() => void runCell(cell)}
           onDelete={() => deleteCell(cell.id)}
@@ -316,6 +330,7 @@ function CellCard({
   total,
   runtime,
   root,
+  autoFocus,
   onEdit,
   onRun,
   onDelete,
@@ -329,6 +344,8 @@ function CellCard({
   total: number
   runtime: CellRuntime
   root: string
+  /** The cell was just added — its textarea should grab focus (edit mode). */
+  autoFocus: boolean
   onEdit: (source: string) => void
   onRun: () => void
   onDelete: () => void
@@ -375,6 +392,7 @@ function CellCard({
           <AutoGrowTextarea
             className="dshj-source"
             value={cell.source}
+            autoFocus={autoFocus}
             onChange={(source) => onEdit(source)}
             onKeyDown={(event) => {
               // Shift+Enter runs the cell (Jupyter muscle memory).
@@ -389,6 +407,7 @@ function CellCard({
             <AutoGrowTextarea
               className="dshj-source"
               value={cell.source}
+              autoFocus={autoFocus}
               onChange={(source) => onEdit(source)}
               onKeyDown={(event) => {
                 if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
@@ -406,6 +425,7 @@ function CellCard({
           <AutoGrowTextarea
             className="dshj-source"
             value={cell.source}
+            autoFocus={autoFocus}
             onChange={(source) => onEdit(source)}
           />
         )}
@@ -439,11 +459,13 @@ function CellCard({
 function AutoGrowTextarea({
   className,
   value,
+  autoFocus,
   onChange,
   onKeyDown,
 }: {
   className: string
   value: string
+  autoFocus?: boolean
   onChange: (source: string) => void
   onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
 }): JSX.Element {
@@ -480,6 +502,7 @@ function AutoGrowTextarea({
       value={value}
       spellCheck={false}
       rows={1}
+      autoFocus={autoFocus}
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={onKeyDown}
     />
