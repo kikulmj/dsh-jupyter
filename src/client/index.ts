@@ -21,13 +21,13 @@ import { injectPanelCss } from './styles.ts'
 import { TextEditor } from './text-editor.tsx'
 
 /** Tab-type identity: the package name (unique across every registration). */
-export const TAB_ID = '@dsh-local/dsh-jupyter'
+export const TAB_ID = '@kikulmj/dsh-jupyter'
 
 /** Tab kind discriminator. */
 export const TAB_KIND = 'ipynb'
 
 /** Text-editor tab identity/kind. */
-export const TEXT_TAB_ID = '@dsh-local/dsh-jupyter/text'
+export const TEXT_TAB_ID = '@kikulmj/dsh-jupyter/text'
 export const TEXT_TAB_KIND = 'text-edit'
 
 /**

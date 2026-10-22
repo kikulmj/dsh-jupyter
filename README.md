@@ -22,16 +22,22 @@ A Jupyter notebook (`.ipynb`) plugin for dsh: open, edit and run notebooks in th
 
 ## Install
 
-From GitHub:
+From npm:
 
 ```sh
-dsh plugin --profile web add github:kikulmj/dsh-jupyter
+dsh plugin --profile web add @kikulmj/dsh-jupyter
 ```
 
 The Desktop app uses the `desktop` profile:
 
 ```sh
-dsh plugin --profile desktop add github:kikulmj/dsh-jupyter
+dsh plugin --profile desktop add @kikulmj/dsh-jupyter
+```
+
+From GitHub (alternative):
+
+```sh
+dsh plugin --profile web add github:kikulmj/dsh-jupyter
 ```
 
 Local development (edit code → `pnpm build` → restart dsh):
@@ -42,7 +48,7 @@ dsh plugin --profile web add link:/path/to/dsh-jupyter
 
 - The dsh installer checks `engines.dsh` (this plugin declares `>=0.2.0-0`) and accepts 0.2.x runtimes.
 - No pnpm `allowBuilds` and no node-gyp are needed: the plugin has no native modules such as `node-pty`.
-- Uninstall: `dsh plugin --profile web remove @dsh-local/dsh-jupyter`.
+- Uninstall: `dsh plugin --profile web remove @kikulmj/dsh-jupyter`.
 
 ## Usage
 

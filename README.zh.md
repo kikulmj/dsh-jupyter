@@ -22,16 +22,22 @@ dsh 的 Jupyter notebook（`.ipynb`）插件：在 Web / Desktop GUI 的右侧�
 
 ## 安装
 
-远程（GitHub）：
+从 npm 安装：
 
 ```sh
-dsh plugin --profile web add github:kikulmj/dsh-jupyter
+dsh plugin --profile web add @kikulmj/dsh-jupyter
 ```
 
 Desktop 应用使用 `desktop` profile：
 
 ```sh
-dsh plugin --profile desktop add github:kikulmj/dsh-jupyter
+dsh plugin --profile desktop add @kikulmj/dsh-jupyter
+```
+
+远程（GitHub，备选）：
+
+```sh
+dsh plugin --profile web add github:kikulmj/dsh-jupyter
 ```
 
 本地开发（改代码 → `pnpm build` → 重启 dsh 即生效）：
@@ -42,7 +48,7 @@ dsh plugin --profile web add link:/path/to/dsh-jupyter
 
 - 新版 dsh 的安装器会校验 `engines.dsh`（本插件为 `>=0.2.0-0`），与 0.2.x 运行时兼容。
 - 不再需要 pnpm 的 `allowBuilds`，也不再需要 node-gyp：插件没有 `node-pty` 之类的原生模块。
-- 卸载：`dsh plugin --profile web remove @dsh-local/dsh-jupyter`。
+- 卸载：`dsh plugin --profile web remove @kikulmj/dsh-jupyter`。
 
 ## 使用
 

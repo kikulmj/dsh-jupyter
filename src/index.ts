@@ -1,5 +1,5 @@
 /**
- * @dsh-local/dsh-jupyter — host half: the Session-scoped notebook file
+ * @kikulmj/dsh-jupyter — host half: the Session-scoped notebook file
  * service and the /dsh-jupyter/* HTTP routes (read/write/raw + NDJSON
  * streaming cell execution through the Python bridge) on the shared
  * webserver. The browser half (exports "./client") registers the notebook as a
@@ -7,7 +7,7 @@
  *
  * The host half also announces the plugin to every agent through the
  * system-prompt section mechanism.
- * @module @dsh-local/dsh-jupyter
+ * @module @kikulmj/dsh-jupyter
  */
 
 import { fileURLToPath } from 'node:url'
