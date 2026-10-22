@@ -1,7 +1,7 @@
 {
   "name": "@kikulmj/dsh-jupyter",
   "description": "Jupyter notebook (.ipynb) viewer, editor and runner for the dsh web GUI: a native right-sidebar tab type driven by the host filesystem service, with a stdlib-only Python kernel bridge that uses dsh's bundled Python. No native dependencies.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "repository": {
     "type": "git",
