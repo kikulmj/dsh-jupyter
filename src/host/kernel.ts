@@ -1,35 +1,24 @@
 /**
  * Jupyter kernel session manager: one long-lived Python bridge subprocess per
- * notebook file (keyed by `${root}\u0000${rel}`), driven over JSONL stdio. The
- * bridge runs a real jupyter_client kernel, so kernel state persists across
- * cell executions (variables, imports, matplotlib state).
+ * notebook (keyed by Session + notebook path), driven over JSONL stdio. The
+ * bridge owns the Python namespace, so kernel state persists across cell
+ * executions (variables, imports, imported modules).
  *
  * Protocol (see kernel_bridge.py): requests are one JSON object per line on
  * stdin; events are one JSON object per line on stdout (`output` streams
- * while a cell runs, `done` finishes it). Only one execution is in flight
- * per session; concurrent execute requests queue FIFO. Output events stream
- * to the current execute's onOutput callback.
+ * while a cell runs, `done` finishes it). One execution is in flight per
+ * session; concurrent execute requests queue FIFO.
  * @module dsh-jupyter/host/kernel
  */
 
 import { Readable } from 'node:stream'
-import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import type { SubprocessHandle, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
-import type { NbOutput, NotebookView } from '../core/types.ts'
-import { NotebookService } from './notebook-service.ts'
-
-const nodeRequire = createRequire(import.meta.url)
-
-/** Kernel-bridge spawn seam (constructor injectable for tests). */
-export type SpawnKernel = (spec: SubprocessSpawnSpec) => SubprocessHandle
-
-/** Production spawn over the subprocess service. */
-export function defaultSpawnKernel(ctx: Context): SpawnKernel {
-  return (spec) => ctx.subprocess.spawn(spec)
-}
+import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
+import type { NbOutput } from '../core/types.ts'
+import { condaEnvFor, resolvePython } from './python.ts'
 
 /** Line-buffer a readable stream, yielding complete lines (newline-stripped). */
 async function* lines(readable: Readable): AsyncGenerator<string> {
@@ -83,19 +72,21 @@ export class KernelSession {
   private requestSeq = 0
   private shutdownRequested = false
   private starting: Promise<void> | undefined
+  private readySignal: 'ready' | 'error' | undefined
+  private readyError: string | undefined
 
   constructor(
-    private readonly root: string,
-    private readonly rel: string,
-    private readonly notebookService: NotebookService,
-    private readonly spawnKernel: SpawnKernel,
+    private readonly ctx: Context,
     private readonly bridgeScript: string,
-    private readonly getKernelName: () => string,
+    private readonly scope: { sessionId: string; root: string },
+    private readonly path: string,
+    /** The interpreter selected for this notebook; undefined means bundled. */
+    readonly python: string | undefined,
   ) {}
 
-  /** The canonical notebook path this session is bound to. */
+  /** The canonical notebook identity this session is bound to. */
   get boundPath(): string {
-    return `${this.root}\u0000${this.rel}`
+    return `${this.scope.sessionId}\u0000${this.path}`
   }
 
   /** True when a bridge process exists (started or starting). */
@@ -117,10 +108,20 @@ export class KernelSession {
     this.send({ op: 'interrupt', id: String(this.requestSeq++) })
   }
 
-  /** Restart the kernel bridge (fresh kernel state). */
+  /** Drop the bridge process; the next execute starts a fresh kernel. */
   restart(): void {
-    if (!this.alive) return
-    this.send({ op: 'restart', id: String(this.requestSeq++) })
+    this.rejectAll('kernel restarted')
+    if (this.handle !== undefined) {
+      try {
+        this.handle.terminate()
+      } catch {
+        // best-effort teardown
+      }
+      this.handle = undefined
+    }
+    this.shutdownRequested = false
+    this.readySignal = undefined
+    this.readyError = undefined
   }
 
   /**
@@ -139,14 +140,15 @@ export class KernelSession {
       }
       this.handle = undefined
     }
-    for (const pending of this.pending.values()) {
-      pending.reject(new Error('kernel session closed'))
-    }
-    this.pending.clear()
-    for (const pending of this.queue.splice(0)) {
-      pending.reject(new Error('kernel session closed'))
-    }
+    this.rejectAll('kernel session closed')
     return { wasAlive }
+  }
+
+  /** Reject every in-flight and queued execute. */
+  private rejectAll(message: string): void {
+    for (const pending of this.pending.values()) pending.reject(new Error(message))
+    this.pending.clear()
+    for (const pending of this.queue.splice(0)) pending.reject(new Error(message))
   }
 
   /** Start the bridge if needed and drain the queue one request at a time. */
@@ -159,6 +161,7 @@ export class KernelSession {
       this.pending.set(id, entry)
       try {
         await this.ensureBridge()
+        if (this.shutdownRequested) throw new Error('kernel session closed')
         this.send({ op: 'execute', id, code: entry.code })
       } catch (error) {
         this.pending.delete(id)
@@ -178,27 +181,34 @@ export class KernelSession {
   }
 
   private async startBridge(): Promise<void> {
-    const gated = await this.notebookService.verify(this.root)
-    if (!gated.ok) {
-      throw new Error(gated.error.message)
+    const python = this.python ?? await resolvePython(this.ctx)
+    // Resolve through the composed filesystem so the bridge runs in the
+    // notebook's real directory (sandbox path included) and never outside the
+    // Session workspace.
+    const rootTarget = await this.ctx.fs.resolve(this.scope.root)
+    const target = await this.ctx.fs.resolve(this.path, { cwd: this.scope.root })
+    if (!this.ctx.fs.contains(rootTarget, target)) {
+      throw new Error(`notebook is outside the workspace: ${this.path}`)
     }
-    // The kernel's cwd is the notebook's directory so relative imports and
-    // data files behave like a real Jupyter session.
-    const cwd = dirname(nodeRequire('node:path').join(gated.canonical, this.rel))
-    const spec: SubprocessSpawnSpec = {
-      argv: ['python3', this.bridgeScript, '--kernel', this.getKernelName(), '--cwd', cwd],
-      cwd: gated.canonical,
+    // Relative imports and data files then behave like a real Jupyter session.
+    const cwd = dirname(this.ctx.fs.processPath(target))
+    if (this.shutdownRequested) throw new Error('kernel session closed')
+    const condaEnv = condaEnvFor(python)
+    const handle = this.ctx.subprocess.spawn({
+      argv: [python, this.bridgeScript, '--cwd', cwd],
+      cwd,
       stdio: {
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: { maxBytes: 64 * 1024 },
       },
       graceMs: 10_000,
-    }
-    const handle = this.spawnKernel(spec)
+      ...condaEnv === undefined ? {} : { env: condaEnv },
+    })
     this.handle = handle
     this.shutdownRequested = false
-    // Drain stdout events; completion waits for the ready event.
+    this.readySignal = undefined
+    this.readyError = undefined
     const ready = this.waitForReady(handle)
     void this.drain(handle)
     await ready
@@ -207,7 +217,7 @@ export class KernelSession {
   /** Wait until the bridge emits `ready` (or an error event / timeout). */
   private waitForReady(handle: SubprocessHandle): Promise<void> {
     return new Promise((resolveReady, rejectReady) => {
-      const timeout = setTimeout(() => rejectReady(new Error('kernel bridge start timed out')), 30_000)
+      const timeout = setTimeout(() => rejectReady(new Error(`kernel bridge start timed out; ${this.stderrTail(handle)}`)), 30_000)
       const check = (): void => {
         if (this.handle !== handle) {
           clearTimeout(timeout)
@@ -223,7 +233,6 @@ export class KernelSession {
         }
       }
       const timer = setInterval(check, 25)
-      check()
       const clear = (): void => {
         clearInterval(timer)
         clearTimeout(timeout)
@@ -231,16 +240,21 @@ export class KernelSession {
       const onDone = (): void => {
         clear()
         if (this.readySignal !== 'ready') {
-          rejectReady(new Error(`kernel bridge exited before ready; ${this.stderrTail}`))
+          rejectReady(new Error(`kernel bridge exited before ready; ${this.stderrTail(handle)}`))
         }
       }
       void handle.done.then(onDone, onDone)
     })
   }
 
-  /** Ready signal set by the drain (ready / error / undefined). */
-  private readySignal: 'ready' | 'error' | undefined
-  private readyError: string | undefined
+  /** The collected stderr tail (diagnostics only). */
+  private stderrTail(handle: SubprocessHandle): string {
+    try {
+      return handle.collected.stderr?.readFrom(0).text ?? ''
+    } catch {
+      return ''
+    }
+  }
 
   /** Consume stdout events and dispatch by id. */
   private async drain(handle: SubprocessHandle): Promise<void> {
@@ -293,6 +307,12 @@ export class KernelSession {
         continue
       }
     }
+    // The bridge exited: fail whatever still waits on it.
+    if (this.handle === handle) {
+      this.handle = undefined
+      this.readySignal = undefined
+      this.rejectAll(`kernel bridge exited; ${this.stderrTail(handle)}`)
+    }
   }
 
   /** Send one JSONL request to the bridge. */
@@ -300,9 +320,6 @@ export class KernelSession {
     if (this.handle === undefined || this.handle.stdin === undefined) return
     this.handle.stdin.write(JSON.stringify(request) + '\n')
   }
-
-  /** Last stderr tail (populated by the exit handler for diagnostics). */
-  private stderrTail = ''
 }
 
 /**
@@ -313,35 +330,35 @@ export class KernelSessionManager {
   private readonly sessions = new Map<string, KernelSession>()
 
   constructor(
-    private readonly notebookService: NotebookService,
-    private readonly spawnKernel: SpawnKernel,
+    private readonly ctx: Context,
     private readonly bridgeScript: string,
-    private readonly getKernelName: (notebook: Pick<NotebookView, 'metadata'>) => string,
   ) {}
 
-  /** Get (or lazily create) the session for a notebook path. */
-  async session(root: string, rel: string): Promise<KernelSession> {
-    const key = `${root}\u0000${rel}`
+  /** Get (or lazily create) the session for one notebook and interpreter. */
+  session(scope: { sessionId: string; root: string }, path: string, python?: string): KernelSession {
+    const selected = python === '' ? undefined : python
+    const key = `${scope.sessionId}\u0000${path}`
     let session = this.sessions.get(key)
+    if (session !== undefined && session.python !== selected) {
+      session.dispose()
+      this.sessions.delete(key)
+      session = undefined
+    }
     if (session === undefined) {
-      // Kernel name follows the notebook's kernelspec when present.
-      let kernelName = 'python3'
-      const view = await this.notebookService.read(root, rel)
-      if (!('code' in view)) kernelName = this.getKernelName(view)
-      session = new KernelSession(root, rel, this.notebookService, this.spawnKernel, this.bridgeScript, () => kernelName)
+      session = new KernelSession(this.ctx, this.bridgeScript, scope, path, selected)
       this.sessions.set(key, session)
     }
     return session
   }
 
   /** Return an existing session without creating one (control ops on idle sessions). */
-  existingSession(root: string, rel: string): KernelSession | undefined {
-    return this.sessions.get(`${root}\u0000${rel}`)
+  existingSession(scope: { sessionId: string; root: string }, path: string): KernelSession | undefined {
+    return this.sessions.get(`${scope.sessionId}\u0000${path}`)
   }
 
   /** Dispose one session (e.g. notebook switch). */
-  disposeSession(root: string, rel: string): KernelDisposeResult {
-    const key = `${root}\u0000${rel}`
+  disposeSession(scope: { sessionId: string; root: string }, path: string): KernelDisposeResult {
+    const key = `${scope.sessionId}\u0000${path}`
     const session = this.sessions.get(key)
     if (session === undefined) return { wasAlive: false }
     this.sessions.delete(key)

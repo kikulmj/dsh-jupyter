@@ -4,19 +4,20 @@
  * @module dsh-jupyter/client/api
  */
 
-import type { ExecuteEvent, JupyterError, NotebookView, NbCell, NbOutput } from '../core/types.ts'
+import type { ExecuteEvent, InterpreterOption, JupyterError, NotebookView, NbCell, NbOutput, TextFileView } from '../core/types.ts'
 
 /** Transport failure (fetch threw or the response was not readable). */
 const TRANSPORT_ERROR: JupyterError = { code: 'internal', message: 'jupyter route unavailable' }
 
 /** POST one JSON payload and decode the envelope; never throws. */
-async function post<T>(path: string, payload: unknown): Promise<{ ok: true; value: T } | { ok: false; error: JupyterError }> {
+async function post<T>(path: string, payload: unknown, signal?: AbortSignal): Promise<{ ok: true; value: T } | { ok: false; error: JupyterError }> {
   let response: Response
   try {
     response = await fetch(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
+      signal,
     })
   } catch {
     return { ok: false, error: TRANSPORT_ERROR }
@@ -30,42 +31,74 @@ async function post<T>(path: string, payload: unknown): Promise<{ ok: true; valu
   }
 }
 
-/** One notebook listing row. */
-export interface NotebookRow {
-  path: string
-  name: string
-}
-
 /** The typed API surface the panel drives. */
 export class JupyterApi {
-  /** Read and parse a notebook file. */
-  read(root: string, path: string): Promise<{ ok: true; value: NotebookView } | { ok: false; error: JupyterError }> {
-    return post<NotebookView>('/dsh-jupyter/read', { root, path })
+  /** List the Python interpreters the kernel picker offers. */
+  async interpreters(signal?: AbortSignal): Promise<{ ok: true; value: InterpreterOption[] } | { ok: false; error: JupyterError }> {
+    let response: Response
+    try {
+      response = await fetch('/dsh-jupyter/interpreters', { signal })
+      const envelope = await response.json() as { ok?: boolean; value?: InterpreterOption[]; error?: JupyterError }
+      if (envelope.ok === true) return { ok: true, value: envelope.value ?? [] }
+      return { ok: false, error: envelope.error ?? TRANSPORT_ERROR }
+    } catch {
+      return { ok: false, error: TRANSPORT_ERROR }
+    }
   }
 
-  /** Write the notebook back (with the mtime conflict check). */
+  /** Read and parse a notebook file. */
+  read(sessionId: string, path: string, signal?: AbortSignal): Promise<{ ok: true; value: NotebookView } | { ok: false; error: JupyterError }> {
+    return post<NotebookView>('/dsh-jupyter/read', { sessionId, path }, signal)
+  }
+
+  /** Replace a non-notebook file with a fresh one-cell notebook. */
+  create(sessionId: string, path: string, overwrite: boolean): Promise<{ ok: true; value: NotebookView } | { ok: false; error: JupyterError }> {
+    return post<NotebookView>('/dsh-jupyter/create', { sessionId, path, overwrite })
+  }
+
+  /** Write the notebook back (with the filesystem version guard). */
   write(
-    root: string,
+    sessionId: string,
     path: string,
     notebook: { cells: NbCell[]; metadata: Record<string, unknown> },
-    baseMtime: number,
-  ): Promise<{ ok: true; value: { mtime: number } } | { ok: false; error: JupyterError }> {
-    return post<{ mtime: number }>('/dsh-jupyter/write', { root, path, notebook, baseMtime })
-  }
-
-  /** List *.ipynb files under the root. */
-  list(root: string): Promise<{ ok: true; value: NotebookRow[] } | { ok: false; error: JupyterError }> {
-    return post<NotebookRow[]>('/dsh-jupyter/list', { root })
+    baseVersion: string,
+  ): Promise<{ ok: true; value: { version: string } } | { ok: false; error: JupyterError }> {
+    return post<{ version: string }>('/dsh-jupyter/write', { sessionId, path, notebook, baseVersion })
   }
 
   /** Interrupt the running cell (no-op when idle). */
-  interrupt(root: string, path: string): Promise<{ ok: true; value: { ok: boolean } } | { ok: false; error: JupyterError }> {
-    return post<{ ok: boolean }>('/dsh-jupyter/interrupt', { root, path })
+  interrupt(sessionId: string, path: string): Promise<{ ok: true; value: { ok: boolean } } | { ok: false; error: JupyterError }> {
+    return post<{ ok: boolean }>('/dsh-jupyter/interrupt', { sessionId, path })
   }
 
   /** Restart the kernel (fresh state). */
-  restart(root: string, path: string): Promise<{ ok: true; value: { ok: boolean } } | { ok: false; error: JupyterError }> {
-    return post<{ ok: boolean }>('/dsh-jupyter/restart', { root, path })
+  restart(sessionId: string, path: string): Promise<{ ok: true; value: { ok: boolean } } | { ok: false; error: JupyterError }> {
+    return post<{ ok: boolean }>('/dsh-jupyter/restart', { sessionId, path })
+  }
+
+  /** Dispose the notebook's kernel session (tab closed). */
+  dispose(sessionId: string, path: string): Promise<{ ok: true; value: { ok: boolean } } | { ok: false; error: JupyterError }> {
+    return post<{ ok: boolean }>('/dsh-jupyter/dispose-session', { sessionId, path })
+  }
+
+  /** Read a plain UTF-8 file for the text editor. */
+  readText(sessionId: string, path: string, signal?: AbortSignal): Promise<{ ok: true; value: TextFileView } | { ok: false; error: JupyterError }> {
+    return post<TextFileView>('/dsh-jupyter/text-read', { sessionId, path }, signal)
+  }
+
+  /** Write a plain UTF-8 file with the filesystem version guard. */
+  writeText(
+    sessionId: string,
+    path: string,
+    text: string,
+    baseVersion: string,
+  ): Promise<{ ok: true; value: { version: string } } | { ok: false; error: JupyterError }> {
+    return post<{ version: string }>('/dsh-jupyter/text-write', { sessionId, path, text, baseVersion })
+  }
+
+  /** URL for a file referenced beside the notebook (markdown images). */
+  rawUrl(sessionId: string, path: string, suffix: string): string {
+    return `/dsh-jupyter/raw?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}${suffix}`
   }
 
   /**
@@ -73,18 +106,19 @@ export class JupyterApi {
    * @returns a promise resolving with the done event; rejects on transport failure.
    */
   async execute(
-    root: string,
+    sessionId: string,
     path: string,
     cellId: string,
     code: string,
     onOutput: (output: NbOutput) => void,
+    python?: string,
   ): Promise<{ executionCount: number | null; status: 'ok' | 'error' }> {
     let response: Response
     try {
       response = await fetch('/dsh-jupyter/execute', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ root, path, cellId, code }),
+        body: JSON.stringify({ sessionId, path, cellId, code, ...python === undefined || python === '' ? {} : { python } }),
       })
     } catch {
       throw new Error('jupyter route unavailable')

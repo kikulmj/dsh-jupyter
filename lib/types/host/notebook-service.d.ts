@@ -1,46 +1,51 @@
 /**
- * Notebook file service: read/write/list .ipynb files inside a gated project
- * root. Reads parse nbformat 4 and normalize cells (source joined to a
- * string, stable ids); writes serialize back with an mtime conflict check.
+ * Notebook file service: parse/serialize nbformat 4 notebooks and move their
+ * bytes through the composed filesystem (`ctx.fs`), with the version guard
+ * supplied by the backend. Workspace confinement comes from `scope.ts`.
  * @module dsh-jupyter/host/notebook-service
  */
-import type { NbCell, NotebookView, JupyterError } from '../core/types.ts';
-import { type GateVerdict, type WorkspaceGate } from './gate.ts';
-/** Parse and normalize a notebook JSON value into the panel's view. */
-export declare function parseNotebook(value: unknown): {
+import type { Context } from '@deepseek-ai/cordis';
+import type { NbCell, NotebookView, JupyterError, TextFileView } from '../core/types.ts';
+import { type NotebookScope } from './scope.ts';
+/**
+ * Parse and normalize a notebook JSON value into the panel's view.
+ * @param value - the parsed notebook, or the panel's write payload.
+ * @param requireFormat - require an explicit `nbformat: 4` (reads); write
+ *   payloads carry only cells and metadata.
+ */
+export declare function parseNotebook(value: unknown, requireFormat?: boolean): {
     cells: NbCell[];
     metadata: Record<string, unknown>;
 } | JupyterError;
 /** Serialize the panel's view back to an nbformat 4 notebook value. */
 export declare function serializeNotebook(view: Pick<NotebookView, 'cells' | 'metadata'>): unknown;
 /**
- * Notebook file service: gated read/write/list of .ipynb files.
- * @param gate - the workspace gate.
+ * Notebook file service over the Session workspace.
+ * @param ctx - context carrying the filesystem service.
  */
 export declare class NotebookService {
-    private readonly gate;
-    constructor(gate: WorkspaceGate);
-    /** Verify a root (used by the kernel layer before opening a session). */
-    verify(root: string): Promise<GateVerdict>;
+    private readonly ctx;
+    constructor(ctx: Context);
+    /** Resolve a notebook path and read its parsed view. */
+    read(scope: NotebookScope, path: string): Promise<NotebookView | JupyterError>;
+    /** Serialize the notebook and write it with the version guard. */
+    write(scope: NotebookScope, path: string, value: unknown, baseVersion: string | undefined): Promise<{
+        version: string;
+    } | JupyterError>;
     /**
-     * Read one workspace file's raw bytes (markdown image srcs in cells).
-     * Gated and traversal-guarded; the bytes go out with the derived mime so
-     * an <img> can load them.
+     * Replace a file with a fresh one-cell notebook. Used when a `.ipynb` is
+     * not parseable and the user explicitly chooses to start over.
      */
-    readRaw(root: string, rel: string): Promise<{
-        data: Buffer;
+    create(scope: NotebookScope, path: string, overwrite: boolean): Promise<NotebookView | JupyterError>;
+    /** Read a plain UTF-8 file for the text editor. */
+    readTextFile(scope: NotebookScope, path: string): Promise<TextFileView | JupyterError>;
+    /** Write a plain UTF-8 file with the version guard and Session policy. */
+    writeTextFile(scope: NotebookScope, path: string, text: string, baseVersion: string | undefined): Promise<{
+        version: string;
+    } | JupyterError>;
+    /** Read raw bytes beside the notebook (markdown images). */
+    readRaw(scope: NotebookScope, path: string): Promise<{
+        data: Uint8Array;
         mime: string;
-        size: number;
     } | JupyterError>;
-    /** Read and parse one notebook file. */
-    read(root: string, rel: string): Promise<NotebookView | JupyterError>;
-    /** Write the notebook back, refusing when the file moved on disk. */
-    write(root: string, rel: string, value: unknown, baseMtime?: number): Promise<{
-        mtime: number;
-    } | JupyterError>;
-    /** Recursively list *.ipynb files under the root (pruned at noise dirs). */
-    listNotebooks(root: string): Promise<{
-        path: string;
-        name: string;
-    }[] | JupyterError>;
 }

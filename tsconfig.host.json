@@ -3,8 +3,12 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "target": "es2022",
-    "lib": ["es2022"],
-    "types": ["node"],
+    "lib": [
+      "es2022"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noEmit": false,
     "declaration": true,
@@ -18,7 +22,12 @@
     "moduleDetection": "force",
     "resolveJsonModule": true,
     "composite": true,
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "tsBuildInfoFile": ".tsbuildinfo/host.tsbuildinfo"
   },
-  "include": ["src/index.ts", "src/core/**/*.ts", "src/host/**/*.ts"]
+  "include": [
+    "src/index.ts",
+    "src/core/**/*.ts",
+    "src/host/**/*.ts"
+  ]
 }

@@ -1,88 +1,101 @@
 /**
- * Browser-half entry for the dsh-jupyter plugin — runs inside the dsh web GUI.
+ * Browser-half entry for the dsh-jupyter plugin.
  *
- * Registers the locale dictionaries and mounts the notebook editor INTO the
- * built-in preview column (aionui-panel): when the active preview tab is a
- * .ipynb, the editor overlays the tab's content container — the tab strip,
- * width drag, collapse and dark theme stay the built-in ones. Failure policy:
- * DOM mounting problems are logged, never thrown — the web shell fails the
- * whole boot when a plugin apply throws.
- *
- * Export discipline (packages/client rule): the /client surface carries what
- * cordis loading needs plus types only — all value exports stay internal.
+ * Registers `.ipynb` as a native right-sidebar tab type: clicking the file in
+ * the built-in Files tree opens it in the same docking surface as the text
+ * preview (tabs, split, fullscreen, persistence and theme are the product's
+ * own), and the body slot renders the notebook editor. No DOM injection and no
+ * polling: the product's tab registry owns routing.
  * @module dsh-jupyter/client
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-// Type-only: pulls the LocaleNamespaceMap merge table.
-import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { JupyterApi } from './api.ts'
-import { NS, dictionaries, setLanguage, type JupyterKey } from './locales.ts'
-import { mountPanel } from './mount.tsx'
-import { TerminalApi } from './terminal/api.ts'
-import { TerminalController } from './terminal/controller.ts'
-import { mountPanel as mountTerminalPanel } from './terminal/mount.tsx'
-import { mountSidebarEntry } from './terminal/sidebar-entry.tsx'
-import { injectTerminalPanelCss } from './terminal/styles.ts'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type { SidebarRightTabDefinition } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import { fileOf, titleOf } from './address.ts'
+import { dictionaries, NS } from './locales.ts'
+import { NotebookPanel } from './panel.tsx'
+import { injectPanelCss } from './styles.ts'
+import { TextEditor } from './text-editor.tsx'
 
-/** Locale namespace this plugin owns. */
-const NS_LOCAL = NS
+/** Tab-type identity: the package name (unique across every registration). */
+export const TAB_ID = '@dsh-local/dsh-jupyter'
 
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface LocaleNamespaceMap {
-    /** dsh-jupyter surface copy. */
-    'dsh-jupyter': JupyterKey
-  }
-}
+/** Tab kind discriminator. */
+export const TAB_KIND = 'ipynb'
 
-/** Required services: sessions (project root) and locale (copy). */
-export const inject = ['sessions', 'locale']
-
-/** Type-only surface (export discipline: no value exports beyond the plugin contract). */
-export type { NotebookPanel } from './panel.tsx'
-export type { TerminalPanel } from './terminal/panel.tsx'
+/** Text-editor tab identity/kind. */
+export const TEXT_TAB_ID = '@dsh-local/dsh-jupyter/text'
+export const TEXT_TAB_KIND = 'text-edit'
 
 /**
- * Mount the notebook editor into the built-in preview column, and the
- * terminal (sidebar entry + center-column panel, dsh-ssh style).
- * @param ctx - client root context (sessions + locale services).
+ * Editable text/code files. Markdown, HTML, CSV, images and office documents
+ * keep the official viewer: their previews are richer than a raw text editor.
  */
-export function apply(ctx: ClientContext): void {
-  ctx.effect(() => ctx.locale.register(NS_LOCAL, dictionaries), 'dsh-jupyter: dictionaries')
+const TEXT_PATTERNS = [
+  '*.py', '*.pyw', '*.pyi', '*.js', '*.jsx', '*.mjs', '*.cjs', '*.ts', '*.tsx', '*.mts', '*.cts',
+  '*.vue', '*.svelte', '*.java', '*.c', '*.h', '*.cc', '*.cpp', '*.cxx', '*.hpp', '*.hh', '*.cs',
+  '*.go', '*.rs', '*.rb', '*.php', '*.lua', '*.r', '*.swift', '*.kt', '*.kts', '*.scala', '*.dart',
+  '*.sh', '*.bash', '*.zsh', '*.fish', '*.ps1', '*.bat', '*.cmd', '*.sql',
+  '*.json', '*.jsonc', '*.yaml', '*.yml', '*.toml', '*.ini', '*.cfg', '*.conf', '*.properties', '*.env',
+  '*.txt', '*.log', '*.css', '*.scss', '*.less', '*.sass', '*.xml', '*.gradle', '*.tex',
+  '*.proto', '*.graphql', '*.gql',
+]
 
-  const api = new JupyterApi()
-  let disposeMount: (() => void) | undefined
+/** The tab type this plugin contributes. */
+const DEFINITION: SidebarRightTabDefinition = {
+  id: TAB_ID,
+  kind: TAB_KIND,
+  patterns: ['*.ipynb'],
+  priority: 'extension',
+  keepMounted: true,
+  canOpen: (address) => {
+    const file = fileOf(address)
+    return file !== null && file.path.toLowerCase().endsWith('.ipynb')
+  },
+  title: titleOf,
+}
+
+/** The editable-text tab type. */
+const TEXT_DEFINITION: SidebarRightTabDefinition = {
+  id: TEXT_TAB_ID,
+  kind: TEXT_TAB_KIND,
+  patterns: TEXT_PATTERNS,
+  priority: 'extension',
+  keepMounted: true,
+  canOpen: (address) => fileOf(address) !== null,
+  title: titleOf,
+}
+
+/** Required client services: slot registry, tab-type registry, copy. */
+export const inject = ['slots', 'sidebarRightTabs', 'locale']
+
+/**
+ * Register the notebook tab type and its body.
+ * @param ctx - client root context.
+ */
+export function apply(ctx: Context): void {
   try {
-    disposeMount = mountPanel(ctx, api)
+    injectPanelCss()
+    ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-jupyter: dictionaries')
+    ctx.effect(() => ctx.sidebarRightTabs.register(DEFINITION), 'dsh-jupyter: ipynb tab type')
+    ctx.effect(() => ctx.sidebarRightTabs.register(TEXT_DEFINITION), 'dsh-jupyter: text tab type')
+    ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+      name: 'sidebar.right.pane.tab',
+      key: TAB_ID,
+      locale: NS,
+      inject: (sessionId) => ({ sessionId }),
+    }, NotebookPanel)), 'dsh-jupyter: notebook body')
+    ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
+      name: 'sidebar.right.pane.tab',
+      key: TEXT_TAB_ID,
+      locale: NS,
+      inject: (sessionId) => ({ sessionId }),
+    }, TextEditor)), 'dsh-jupyter: text body')
   } catch (error) {
-    // DOM failures degrade the notebook editor, never the GUI.
-    console.warn('[dsh-jupyter] mount failed:', error)
+    // A broken notebook tab degrades that tab, never the whole shell boot.
+    console.warn('[dsh-jupyter] registration failed:', error)
   }
-
-  const terminalApi = new TerminalApi()
-  const terminalController = new TerminalController()
-  const disposers: Array<() => void> = []
-  try {
-    injectTerminalPanelCss()
-    disposers.push(mountSidebarEntry(terminalController))
-    disposers.push(mountTerminalPanel(ctx, terminalController, terminalApi))
-  } catch (error) {
-    // DOM failures degrade the terminal panel, never the GUI.
-    console.warn('[dsh-jupyter] terminal mount failed:', error)
-  }
-  // Language mirroring (the shell owns <html lang>; the dictionary follows).
-  let langObserver: MutationObserver | undefined
-  const syncLanguage = (): void => {
-    setLanguage(document.documentElement.lang?.startsWith('zh') ? 'zh' : 'en')
-  }
-  langObserver = new MutationObserver(syncLanguage)
-  langObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] })
-  syncLanguage()
-
-  ctx.effect(() => () => {
-    langObserver?.disconnect()
-    disposeMount?.()
-    for (const dispose of disposers.splice(0)) dispose()
-  }, 'dsh-jupyter: ui mounts')
 }

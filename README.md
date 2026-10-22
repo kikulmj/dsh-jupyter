@@ -1,88 +1,108 @@
 # dsh-jupyter
 
-Jupyter notebook 编辑 / 运行 + Web 终端的 dsh 插件（profile bundle 层安装）。
+English | [中文](README.zh.md)
 
-## 功能
+A Jupyter notebook (`.ipynb`) plugin for dsh: open, edit and run notebooks in the Web/Desktop GUI's right sidebar. Rebuilt for the dsh 0.2.x plugin model — plain JavaScript plus one Python script, with no native dependencies and no terminal.
 
-- **Notebook**：右侧预览面板点击 `.ipynb` 打开，编辑 code/markdown/raw 单元格、增删移动、保存回磁盘；单元格由宿主真实 Jupyter 内核（`jupyter_client`）执行，输出流式渲染（文本 / HTML / 图片 / JSON / 错误），支持中断与重启内核。
-  <img width="2878" height="1639" alt="屏幕截图 2026-08-16 171747" src="https://github.com/user-attachments/assets/1295bedb-cc96-4386-99b2-d6b0f0fec579" />
-  
-- **终端**：左侧边栏「终端」入口（New Session 下方）展开中间列面板——node-pty 真实 PTY（TERM=xterm-256color）+ xterm.js，复制 / 粘贴走标准键盘快捷键，支持清屏 / 重启 / 关闭，关闭面板不销毁 shell。
-  <img width="2878" height="1624" alt="屏幕截图 2026-08-16 171612" src="https://github.com/user-attachments/assets/bb2a7969-1aca-4519-86ab-3ae38745fd2c" />
+## Demo
 
-## 安装
+<img src="docs/demo.webp" width="960" alt="The dsh-jupyter notebook tab: a conda: binxing kernel, highlighted Python code, and an inline matplotlib plot">
 
-远程（GitHub）：
+## Features
+
+- **Native right-sidebar tab**: clicking a `.ipynb` in the file tree opens it in the same tab system as the text preview. The tab strip, dragging, split view, fullscreen, layout persistence and theme all come from dsh; the plugin only contributes tab types.
+- **Text/code file editing**: common source and config extensions (`.py`, `.js`, `.ts`, `.json`, `.yaml`, `.toml`, `.sh`, `.sql`, `.txt`, `.css`, and more) are also handled by this plugin, with editing and saving in the right-sidebar tab. Markdown, HTML, CSV, images, PDF and Office documents stay with the official preview so their richer read-only views are preserved.
+- **Cell editing**: code / markdown / raw cells; add, delete and move cells; run all; markdown preview (double-click to edit).
+- **Highlighting and indentation**: Python syntax highlighting (keywords, strings, numbers, comments, builtins, decorators, `!` magic lines); Tab / Shift+Tab to indent and dedent; Enter keeps the current indentation and adds a level after `:`.
+- **Empty files and recovery**: a 0-byte or whitespace-only `.ipynb` opens as a new notebook; a file that is not valid notebook JSON shows an error with **Reload** / **Open as empty notebook** actions.
+- **Real execution**: cells run in a persistent Python kernel in the host process, sharing variables, imports and module state between cells. Output streams as it arrives (stdout/stderr, HTML, Markdown, PNG/JPEG/SVG, JSON, tracebacks), with interrupt and kernel restart.
+- **Kernel environment picker**: choose the bundled Python or a conda environment registered in `~/.conda/environments.txt` from the notebook toolbar. Switching restarts the kernel on that interpreter, and the choice is stored in the notebook metadata.
+- **Saving**: writes go through dsh's filesystem with its version guard. If the file changed on disk, saving reports a conflict instead of silently overwriting it.
+- **Rich output**: pandas `DataFrame` uses `_repr_html_`; PIL images and `_repr_png_` / `_repr_svg_` / `_repr_json_` / `_repr_markdown_` are rendered. matplotlib figures (when installed in that Python environment) are emitted as inline PNGs after the cell.
+
+## Install
+
+From GitHub:
 
 ```sh
 dsh plugin --profile web add github:kikulmj/dsh-jupyter
-# 或完整 URL：
-dsh plugin --profile web add git+https://github.com/kikulmj/dsh-jupyter.git
 ```
 
-本地开发（指向本地仓库，改代码 → `pnpm build` → 刷新即生效）：
+The Desktop app uses the `desktop` profile:
+
+```sh
+dsh plugin --profile desktop add github:kikulmj/dsh-jupyter
+```
+
+Local development (edit code → `pnpm build` → restart dsh):
 
 ```sh
 dsh plugin --profile web add link:/path/to/dsh-jupyter
 ```
 
-> 构建产物（`lib/`）已随仓库提交，远端安装无需本机构建。
->
-> **首次安装需放行 node-pty 原生构建**（pnpm 11 默认阻止依赖的 build 脚本）：第一次执行后 dsh 会在 `~/.dsh/profiles/web/pnpm-workspace.yaml` 自动预写 `allowBuilds: { node-pty: set this to true or false }`，把它改成 `node-pty: true`，再重跑同一条安装命令（node-pty 将本地编译，约 10 秒）。安装完成后重启 `dsh web` 生效。
->
-> **本地 link 安装**时，`node-pty` 会从插件自身目录（仓库）解析，因此需先在仓库里 `pnpm install`（仓库自带 `pnpm-workspace.yaml`，已放行 node-pty 构建）。
+- The dsh installer checks `engines.dsh` (this plugin declares `>=0.2.0-0`) and accepts 0.2.x runtimes.
+- No pnpm `allowBuilds` and no node-gyp are needed: the plugin has no native modules such as `node-pty`.
+- Uninstall: `dsh plugin --profile web remove @dsh-local/dsh-jupyter`.
 
-## 卸载
+## Usage
 
-```sh
-dsh plugin --profile web remove @dsh-local/dsh-jupyter
-```
+1. Open a project session.
+2. Open the right-sidebar file tree (default `Mod+P`) and click any `.ipynb`.
+3. The notebook opens as a tab on the right; press `Shift+Enter` to run a code cell and `Ctrl/Cmd+S` to save.
+4. Common IPython line syntax is supported: `!command` (for example `!pip list`; `pip` / `python` resolve to the current kernel interpreter), `%pip`, `%cd`, `%pwd`.
+5. Clicking a text file such as `.py`, `.json` or `.txt` opens an editable tab; `Ctrl/Cmd+S` saves, with a version-conflict check.
+6. Use the **Kernel environment** picker in the notebook toolbar to switch to a conda env (for example `conda: binxing`). `!conda activate` inside a cell only affects that shell subprocess and cannot change the kernel; the picker restarts the kernel on the chosen interpreter and stores the choice in the notebook metadata.
+7. Open `examples/plot-demo.ipynb` for a matplotlib demo and a dependency-free SVG fallback.
 
-自动移除 `dependencies` 与 `bundles` 中的插件条目；重启 `dsh web` 后界面入口消失。若之后再安装，按上文流程（含 allowBuilds 引导）重新执行即可。
+## Kernel
 
-## 验证
+- Interpreter priority for the bundled choice: `$DSH_PRIMARY_RUNTIME/dependencies/python/…` → `$DSH_HOME/dsh-runtimes/dsh-primary-runtime/dependencies/python/…` → `python3` / `python` on `PATH`.
+- Conda environments listed in `~/.conda/environments.txt` (and `~/.anaconda/environments.txt`) appear in the picker. Selecting one runs its `python` directly and sets `PATH` / `CONDA_PREFIX` / `CONDA_DEFAULT_ENV` to approximate `conda activate`.
+- The Python 3.12 bundled with Desktop already includes numpy, pandas and Pillow. The kernel bridge uses only the standard library and does not depend on `jupyter_client` or `ipykernel`.
+- Python kernels only. A notebook's other kernelspec does not switch languages; it still runs on Python.
 
-```sh
-curl -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3080/dsh-terminal/xterm.css   # 200 = 宿主路由已注册
-```
-
-- 左侧边栏 New Session 下方出现「终端」入口，点击展开中间列终端面板。
-- 远端安装后 `~/.dsh/profiles/web/node_modules/@dsh-local/dsh-jupyter/lib/` 含 `index.js` / `client.js`；本地 link 安装时该路径是指向仓库的软链接。
-
-## 使用
-
-1. 进入任意项目会话。
-2. **Notebook**：右侧 Explorer 点击 `.ipynb`，`Shift+Enter` 运行单元格。
-3. **终端**：左侧边栏「终端」入口；shell 初始目录为当前项目根.
-
-## 开发
-
-```sh
-pnpm install   # 首次：装依赖并编译 node-pty（原生模块）
-pnpm build     # 生成 xterm.css.ts → tsc → tsdown → 复制 kernel_bridge.py / xterm.css
-```
-
-- `node-pty` 是原生模块，运行时经 `createRequire(import.meta.url)` 从插件自身目录解析——本地 link 安装时仓库必须有自己的 `node_modules`。
-- `@xterm/xterm` 在构建时内联进 client bundle。
-- 客户端 bundle 改动：刷新页面（或 HMR）即生效；宿主端（路由 / PTY）改动需重启 `dsh web`。
-
-## 架构
+## Architecture
 
 ```
 src/
-  index.ts             宿主端：注册 /dsh-jupyter/* + /dsh-terminal/* 路由 + agent 通告
-  core/                wire 类型（notebook + terminal）
-  host/                notebook 服务/内核桥（jupyter_client）；终端 PTY 管理器（node-pty）+ 路由
-  client/              notebook 预览列注入；终端（侧边栏入口 + 中间列面板）
+  index.ts              Host half: /dsh-jupyter/* routes + agent announcement
+  core/types.ts         Wire types
+  host/scope.ts         Session workspace resolution + filesystem boundary checks
+  host/notebook-service.ts  nbformat 4 parse/serialize, reads and writes through ctx.fs (version guard)
+  host/routes.ts        read / write / raw / text-read / text-write / execute / interrupt / restart
+  host/python.ts        Locate dsh's bundled Python and list conda environments
+  host/kernel.ts        One persistent Python kernel process per notebook (JSONL stdio)
+  host/kernel_bridge.py Stdlib-only Python kernel bridge (persistent namespace, streaming, interrupt)
+  client/index.ts       Register the `.ipynb` and text-file tab types and body slots
+  client/panel.tsx      Notebook editor (native slot component)
+  client/text-editor.tsx Text/code file editor
+  client/code-editor.tsx Transparent textarea + highlight overlay
+  client/highlight.ts   Python / JS / C / Shell / SQL tokenizer
+  client/api.ts         /dsh-jupyter client
+  client/styles.ts      Cell/output/editor styles over dsh's `--dsw-*` theme tokens
 ```
 
-## 安全
+The browser half only `require`s `react`; the host half imports Node built-ins only. Every dsh service is declared as a peer dependency and provided by the profile at runtime.
 
-- 所有路由 loopback-only + same-origin 校验（CSRF 防线），变更类 POST 要求 `application/json`。
-- notebook 路由有 workspace 门禁；终端是真实 shell（宿主用户全权限、可 `cd` 任意目录），不设门禁——真实防线是 loopback 同源校验（仅本机同源浏览器可开会话）。
+## Security
 
-## 限制
+- Every route accepts loopback requests only and checks Host / Origin (the same-origin fence).
+- Reads and writes are rooted at the Session's working directory, bounded with `ctx.fs.resolve` + `ctx.fs.contains`, and written through dsh's sandboxed filesystem policy — the workspace limit is never bypassed.
+- The kernel runs cell code with the host user's privileges. That is the inherent semantics of a notebook; only run notebooks you trust.
 
-- 内核桥需宿主 Python 安装 `jupyter_client`、`ipykernel`。
-- 终端为单会话面板：关闭面板不销毁 shell，重启 / `exit` 才结束 PTY；宿主卸载时全部回收。
-- 宿主端（路由 / PTY）改动需重启 `dsh web`；客户端 bundle 改动走 HMR 自动重载。
+## Limitations
+
+- `input()` / stdin interaction is not supported.
+- `!conda activate` only changes that one shell subprocess; it does not change the kernel. Use the toolbar's **Kernel environment** picker instead.
+- Inline magics `!`, `%pip`, `%cd` and `%pwd` are supported; `%%` cell magics and other IPython magics (`%time`, `%run`, …) are not.
+- `!` commands run with the host user's privileges; output written directly to file descriptors by C extensions or subprocesses is shown once the cell finishes, not streamed live.
+- Text editing supports UTF-8 text only, up to 8 MiB per file; binary files still go to the official preview.
+- Host-half changes require restarting dsh; client-bundle changes reload through dsh HMR.
+- `lib/` is committed, so remote installs need no local build.
+
+## Development
+
+```sh
+pnpm install
+pnpm build     # tsc → tsdown → copy kernel_bridge.py
+```
