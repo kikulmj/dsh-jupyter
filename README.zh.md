@@ -6,7 +6,7 @@ dsh 的 Jupyter notebook（`.ipynb`）插件：在 Web / Desktop GUI 的右侧�
 
 ## 演示
 
-<img src="docs/demo-notebook.png" width="640" alt="在右侧标签页中运行 IPython 单元格并显示输出">
+<img src="docs/demo.webp" width="960" alt="dsh-jupyter 笔记本标签页：选择 conda: binxing 内核、Python 代码高亮和内联 matplotlib 图">
 
 ## 功能
 

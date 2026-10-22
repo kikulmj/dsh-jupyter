@@ -6,7 +6,7 @@ A Jupyter notebook (`.ipynb`) plugin for dsh: open, edit and run notebooks in th
 
 ## Demo
 
-<img src="docs/demo-notebook.png" width="640" alt="A notebook tab running IPython cells and rendering their output">
+<img src="docs/demo.webp" width="960" alt="The dsh-jupyter notebook tab: a conda: binxing kernel, highlighted Python code, and an inline matplotlib plot">
 
 ## Features
 
