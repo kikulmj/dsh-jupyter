@@ -10,11 +10,11 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 /** Tab-type identity: the package name (unique across every registration). */
-export declare const TAB_ID = "@dsh-local/dsh-jupyter";
+export declare const TAB_ID = "@kikulmj/dsh-jupyter";
 /** Tab kind discriminator. */
 export declare const TAB_KIND = "ipynb";
 /** Text-editor tab identity/kind. */
-export declare const TEXT_TAB_ID = "@dsh-local/dsh-jupyter/text";
+export declare const TEXT_TAB_ID = "@kikulmj/dsh-jupyter/text";
 export declare const TEXT_TAB_KIND = "text-edit";
 /** Required client services: slot registry, tab-type registry, copy. */
 export declare const inject: string[];

@@ -11,7 +11,7 @@ A Jupyter notebook (`.ipynb`) plugin for dsh: open, edit and run notebooks in th
 ## Features
 
 - **Native right-sidebar tab**: clicking a `.ipynb` in the file tree opens it in the same tab system as the text preview. The tab strip, dragging, split view, fullscreen, layout persistence and theme all come from dsh; the plugin only contributes tab types.
-- **Text/code file editing**: common source and config extensions (`.py`, `.js`, `.ts`, `.json`, `.yaml`, `.toml`, `.sh`, `.sql`, `.txt`, `.css`, and more) are also handled by this plugin, with editing and saving in the right-sidebar tab. Markdown, HTML, CSV, images, PDF and Office documents stay with the official preview so their richer read-only views are preserved.
+- **Text/code file editing**: common source, config and documentation extensions (`.py`, `.js`, `.ts`, `.json`, `.yaml`, `.toml`, `.sh`, `.sql`, `.md`, `.txt`, `.css`, and more) are also handled by this plugin, with editing and saving in the right-sidebar tab. HTML, CSV, images, PDF and Office documents stay with the official preview so their richer read-only views are preserved.
 - **Cell editing**: code / markdown / raw cells; add, delete and move cells; run all; markdown preview (double-click to edit).
 - **Highlighting and indentation**: Python syntax highlighting (keywords, strings, numbers, comments, builtins, decorators, `!` magic lines); Tab / Shift+Tab to indent and dedent; Enter keeps the current indentation and adds a level after `:`.
 - **Empty files and recovery**: a 0-byte or whitespace-only `.ipynb` opens as a new notebook; a file that is not valid notebook JSON shows an error with **Reload** / **Open as empty notebook** actions.
@@ -22,16 +22,22 @@ A Jupyter notebook (`.ipynb`) plugin for dsh: open, edit and run notebooks in th
 
 ## Install
 
-From GitHub:
+From npm:
 
 ```sh
-dsh plugin --profile web add github:kikulmj/dsh-jupyter
+dsh plugin --profile web add @kikulmj/dsh-jupyter
 ```
 
 The Desktop app uses the `desktop` profile:
 
 ```sh
-dsh plugin --profile desktop add github:kikulmj/dsh-jupyter
+dsh plugin --profile desktop add @kikulmj/dsh-jupyter
+```
+
+From GitHub (alternative):
+
+```sh
+dsh plugin --profile web add github:kikulmj/dsh-jupyter
 ```
 
 Local development (edit code → `pnpm build` → restart dsh):
@@ -42,7 +48,7 @@ dsh plugin --profile web add link:/path/to/dsh-jupyter
 
 - The dsh installer checks `engines.dsh` (this plugin declares `>=0.2.0-0`) and accepts 0.2.x runtimes.
 - No pnpm `allowBuilds` and no node-gyp are needed: the plugin has no native modules such as `node-pty`.
-- Uninstall: `dsh plugin --profile web remove @dsh-local/dsh-jupyter`.
+- Uninstall: `dsh plugin --profile web remove @kikulmj/dsh-jupyter`.
 
 ## Usage
 
@@ -60,6 +66,7 @@ dsh plugin --profile web add link:/path/to/dsh-jupyter
 - Conda environments listed in `~/.conda/environments.txt` (and `~/.anaconda/environments.txt`) appear in the picker. Selecting one runs its `python` directly and sets `PATH` / `CONDA_PREFIX` / `CONDA_DEFAULT_ENV` to approximate `conda activate`.
 - The Python 3.12 bundled with Desktop already includes numpy, pandas and Pillow. The kernel bridge uses only the standard library and does not depend on `jupyter_client` or `ipykernel`.
 - Python kernels only. A notebook's other kernelspec does not switch languages; it still runs on Python.
+- On Windows, `!` commands whose first token is a common POSIX tool (`ls`, `cat`, `grep`, …) run through Git Bash when it is installed; other commands (`dir`, `conda`) keep `cmd.exe`.
 
 ## Architecture
 

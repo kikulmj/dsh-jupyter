@@ -1,5 +1,5 @@
 /**
- * tsdown build for @dsh-local/dsh-jupyter — two artifacts:
+ * tsdown build for @kikulmj/dsh-jupyter — two artifacts:
  *
  * 1. `lib/index.js`  — the node half (ESM): session-scoped notebook file
  *    routes and the Python kernel bridge manager. @deepseek-ai/* stay
@@ -25,7 +25,7 @@ const NODE_ENV = process.env.NODE_ENV ?? 'production'
 
 export default [
   {
-    name: '@dsh-local/dsh-jupyter',
+    name: '@kikulmj/dsh-jupyter',
     entry: ['src/index.ts'],
     outDir: 'lib',
     format: ['esm'],
@@ -40,7 +40,7 @@ export default [
     external: [/^@deepseek-ai\//],
   },
   {
-    name: '@dsh-local/dsh-jupyter/client',
+    name: '@kikulmj/dsh-jupyter/client',
     entry: { client: 'src/client/index.ts' },
     outDir: 'lib',
     format: 'cjs',
@@ -57,7 +57,7 @@ export default [
     noExternal: (id: string) => (PLATFORM_MODULES.includes(id) ? undefined : true),
     outputOptions: {
       entryFileNames: 'client.js',
-      banner: 'window.__ModuleLoader__.load({ id: "@dsh-local/dsh-jupyter", factory: (require) => {',
+      banner: 'window.__ModuleLoader__.load({ id: "@kikulmj/dsh-jupyter", factory: (require) => {',
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },

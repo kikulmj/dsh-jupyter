@@ -282,6 +282,18 @@ export const PANEL_CSS = `
   box-shadow: inset 0 0 0 2px var(--dsw-alias-brand-primary, #165dff);
 }
 
+/* The shell's global focus ring is a heavy black outline; the editor uses the
+   subtle inset shadow above instead. */
+.dshj-editor textarea,
+.dshj-editor textarea:focus,
+.dshj-editor textarea:focus-visible,
+.dshj-editor pre,
+.dshj-code-wrap:focus-within,
+.dshj-text-body:focus-within {
+  outline: none !important;
+  border: 0 !important;
+}
+
 /* Code cells: transparent textarea over a highlighted <pre>. */
 .dshj-code-wrap {
   position: relative;

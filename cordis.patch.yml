@@ -10,4 +10,4 @@
 # right-sidebar tab type.
 - insert:
     - id: dsh-jupyter
-      name: '@dsh-local/dsh-jupyter'
+      name: '@kikulmj/dsh-jupyter'

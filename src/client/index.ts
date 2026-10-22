@@ -21,13 +21,13 @@ import { injectPanelCss } from './styles.ts'
 import { TextEditor } from './text-editor.tsx'
 
 /** Tab-type identity: the package name (unique across every registration). */
-export const TAB_ID = '@dsh-local/dsh-jupyter'
+export const TAB_ID = '@kikulmj/dsh-jupyter'
 
 /** Tab kind discriminator. */
 export const TAB_KIND = 'ipynb'
 
 /** Text-editor tab identity/kind. */
-export const TEXT_TAB_ID = '@dsh-local/dsh-jupyter/text'
+export const TEXT_TAB_ID = '@kikulmj/dsh-jupyter/text'
 export const TEXT_TAB_KIND = 'text-edit'
 
 /**
@@ -40,8 +40,12 @@ const TEXT_PATTERNS = [
   '*.go', '*.rs', '*.rb', '*.php', '*.lua', '*.r', '*.swift', '*.kt', '*.kts', '*.scala', '*.dart',
   '*.sh', '*.bash', '*.zsh', '*.fish', '*.ps1', '*.bat', '*.cmd', '*.sql',
   '*.json', '*.jsonc', '*.yaml', '*.yml', '*.toml', '*.ini', '*.cfg', '*.conf', '*.properties', '*.env',
-  '*.txt', '*.log', '*.css', '*.scss', '*.less', '*.sass', '*.xml', '*.gradle', '*.tex',
+  '*.txt', '*.text', '*.log', '*.md', '*.markdown', '*.mdx', '*.rst', '*.adoc',
+  '*.css', '*.scss', '*.less', '*.sass', '*.xml', '*.gradle', '*.tex',
   '*.proto', '*.graphql', '*.gql',
+  'LICENSE', 'LICENCE', 'README', 'CHANGELOG', 'NOTICE', 'AUTHORS', 'CONTRIBUTING',
+  'Makefile', 'Dockerfile', 'Rakefile', 'Gemfile',
+  '.gitignore', '.gitattributes', '.editorconfig', '.npmrc', '.prettierrc', '.eslintrc',
 ]
 
 /** The tab type this plugin contributes. */
