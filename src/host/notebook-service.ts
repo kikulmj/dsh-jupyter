@@ -1,65 +1,49 @@
 /**
- * Notebook file service: read/write/list .ipynb files inside a gated project
- * root. Reads parse nbformat 4 and normalize cells (source joined to a
- * string, stable ids); writes serialize back with an mtime conflict check.
+ * Notebook file service: parse/serialize nbformat 4 notebooks and move their
+ * bytes through the composed filesystem (`ctx.fs`), with the version guard
+ * supplied by the backend. Workspace confinement comes from `scope.ts`.
  * @module dsh-jupyter/host/notebook-service
  */
 
-import { readFile, readdir, realpath, stat, writeFile, mkdir } from 'node:fs/promises'
-import { join, dirname } from 'node:path'
-import type { Dirent } from 'node:fs'
-import type { NbCell, NbOutput, NotebookView, JupyterError } from '../core/types.ts'
-import { isPathInside, type GateVerdict, type WorkspaceGate } from './gate.ts'
+import type { Context } from '@deepseek-ai/cordis'
+import type { FsTarget, FsVersion } from '@deepseek-ai/dsh-fs'
+import type {} from '@deepseek-ai/dsh-fs'
+import type { NbCell, NbOutput, NotebookView, JupyterError, TextFileView } from '../core/types.ts'
+import { resolveFile, type NotebookScope } from './scope.ts'
 
 /** Notebook size cap (parse budget for the panel). */
 const NOTEBOOK_CAP_BYTES = 32 << 20
 
-/** Recursive listing caps for notebook discovery. */
-const LIST_SCAN_CAP = 20_000
-const LIST_HIT_CAP = 500
-/** Directories skipped by the recursive notebook listing. */
-const LIST_SKIP_DIRS = new Set(['.git', 'node_modules'])
+/** Cap on an image or related file served beside the notebook. */
+const RAW_CAP_BYTES = 32 << 20
 
-/**
- * Resolve a workspace-relative path against the canonical root, refusing to
- * escape it (realpath check on the nearest existing ancestor, so a symlink
- * cannot smuggle the operation outside the root).
- */
-async function resolveInsideRoot(root: string, rel: string): Promise<{ ok: true; abs: string } | { ok: false; error: JupyterError }> {
-  if (rel.includes('\0')) return { ok: false, error: { code: 'path-outside-root', message: 'invalid path' } }
-  const abs = join(root, rel)
-  if (!isPathInside(root, abs)) {
-    return { ok: false, error: { code: 'path-outside-root', message: `path escapes root: ${rel}` } }
+/** Cap on a plain text file opened in the editor. */
+const TEXT_CAP_BYTES = 8 << 20
+
+/** An empty nbformat 4 view with one ready-to-type code cell. */
+function emptyNotebook(path: string, version: string): NotebookView {
+  return {
+    path,
+    cells: [{
+      id: 'cell-0',
+      cell_type: 'code',
+      source: '',
+      execution_count: null,
+      outputs: [],
+      metadata: {},
+      path,
+    }],
+    metadata: {
+      kernelspec: { name: 'python3', display_name: 'Python 3', language: 'python' },
+      language_info: { name: 'python' },
+    },
+    version,
   }
-  let probe = abs
-  for (let hop = 0; hop < 32; hop += 1) {
-    let real: string
-    try {
-      real = await realpath(probe)
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code
-      if (code !== 'ENOENT') return { ok: true, abs }
-      const parent = dirname(probe)
-      if (parent === probe) return { ok: true, abs }
-      probe = parent
-      continue
-    }
-    if (!isPathInside(root, real)) {
-      return { ok: false, error: { code: 'path-outside-root', message: `path resolves outside root: ${rel}` } }
-    }
-    return { ok: true, abs }
-  }
-  return { ok: false, error: { code: 'path-outside-root', message: 'path cannot be resolved' } }
 }
 
-/** True when the relative path passes through a .git component. */
-function isGitPath(rel: string): boolean {
-  return rel.split('/').some((part) => part.toLowerCase() === '.git')
-}
-
-/** Derive a mime type from a file extension (image focus, like the panel). */
-function mimeOf(rel: string): string {
-  const ext = rel.split('.').pop()?.toLowerCase() ?? ''
+/** Derive a mime type from a file extension. */
+function mimeOf(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
   const byExt: Record<string, string> = {
     png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
     webp: 'image/webp', svg: 'image/svg+xml', ico: 'image/x-icon', avif: 'image/avif',
@@ -76,14 +60,25 @@ function sourceToString(source: unknown): string {
   return ''
 }
 
-/** Parse and normalize a notebook JSON value into the panel's view. */
-export function parseNotebook(value: unknown): { cells: NbCell[]; metadata: Record<string, unknown> } | JupyterError {
+/**
+ * Parse and normalize a notebook JSON value into the panel's view.
+ * @param value - the parsed notebook, or the panel's write payload.
+ * @param requireFormat - require an explicit `nbformat: 4` (reads); write
+ *   payloads carry only cells and metadata.
+ */
+export function parseNotebook(
+  value: unknown,
+  requireFormat = true,
+): { cells: NbCell[]; metadata: Record<string, unknown> } | JupyterError {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { code: 'not-notebook', message: 'notebook must be a JSON object' }
   }
   const nb = value as Record<string, unknown>
-  if (nb.nbformat !== 4) {
+  if (nb.nbformat !== undefined && nb.nbformat !== 4) {
     return { code: 'not-notebook', message: 'only nbformat 4 notebooks are supported' }
+  }
+  if (requireFormat && nb.nbformat === undefined) {
+    return { code: 'not-notebook', message: 'notebook is missing nbformat 4' }
   }
   const rawCells = Array.isArray(nb.cells) ? nb.cells : []
   const cells: NbCell[] = []
@@ -166,161 +161,183 @@ export function serializeNotebook(view: Pick<NotebookView, 'cells' | 'metadata'>
   }
 }
 
+/** Stable fs error code, when the thrown value is an FsError. */
+function fsCodeOf(error: unknown): string | undefined {
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code: unknown }).code)
+    : undefined
+}
+
+/** Map a filesystem failure onto the route vocabulary. */
+function fsFailure(error: unknown, fallback: JupyterError): JupyterError {
+  const code = fsCodeOf(error)
+  if (code === 'FS_NOT_FOUND' || code === 'FS_NOT_REGULAR_FILE' || code === 'FS_NOT_DIRECTORY') {
+    return { code: 'not-found', message: fallback.message }
+  }
+  if (code === 'FS_STALE_VERSION') return { code: 'write-conflict', message: 'file changed on disk since it was loaded' }
+  if (code === 'FS_TOO_LARGE') return { code: 'not-notebook', message: 'file exceeds the size cap' }
+  if (code === 'FS_NOT_TEXT') return { code: 'not-text', message: 'file is not UTF-8 text' }
+  if (code === 'FS_SANDBOX_DENIED') {
+    return { code: 'write-failed', message: `${fallback.message}: denied by the session sandbox policy` }
+  }
+  if (code === 'FS_PERMISSION_DENIED') {
+    return { code: 'write-failed', message: `${fallback.message}: permission denied` }
+  }
+  return fallback
+}
+
 /**
- * Notebook file service: gated read/write/list of .ipynb files.
- * @param gate - the workspace gate.
+ * Notebook file service over the Session workspace.
+ * @param ctx - context carrying the filesystem service.
  */
 export class NotebookService {
-  constructor(private readonly gate: WorkspaceGate) {}
+  constructor(private readonly ctx: Context) {}
 
-  /** Verify a root (used by the kernel layer before opening a session). */
-  verify(root: string): Promise<GateVerdict> {
-    return this.gate(root)
+  /** Resolve a notebook path and read its parsed view. */
+  async read(scope: NotebookScope, path: string): Promise<NotebookView | JupyterError> {
+    const resolved = await resolveFile(this.ctx, scope, path)
+    if (!resolved.ok) return resolved.error
+    try {
+      const info = await this.ctx.fs.stat(resolved.target)
+      if (info === undefined || info.type !== 'file') return { code: 'not-found', message: `not a file: ${path}` }
+      if (info.size !== undefined && info.size > NOTEBOOK_CAP_BYTES) {
+        return { code: 'not-notebook', message: 'notebook exceeds read cap' }
+      }
+      const raw = await this.ctx.fs.readText(resolved.target)
+      // A UTF-8 BOM survives some editors; JSON.parse rejects it.
+      const text = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      // An empty/whitespace file is a new notebook, not a parse failure.
+      if (text.trim() === '') return emptyNotebook(path, String(info.version))
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text) as unknown
+      } catch {
+        return { code: 'not-notebook', message: `${path} is not valid JSON` }
+      }
+      const result = parseNotebook(parsed)
+      if ('code' in result) return result
+      return {
+        path,
+        cells: result.cells.map((cell) => ({ ...cell, path })),
+        metadata: result.metadata,
+        version: String(info.version),
+      }
+    } catch (error) {
+      return fsFailure(error, { code: 'not-found', message: `cannot read ${path}` })
+    }
+  }
+
+  /** Serialize the notebook and write it with the version guard. */
+  async write(
+    scope: NotebookScope,
+    path: string,
+    value: unknown,
+    baseVersion: string | undefined,
+  ): Promise<{ version: string } | JupyterError> {
+    const resolved = await resolveFile(this.ctx, scope, path)
+    if (!resolved.ok) return resolved.error
+    const parsed = parseNotebook(value, false)
+    if ('code' in parsed) return parsed
+    const payload = serializeNotebook({ cells: parsed.cells, metadata: parsed.metadata })
+    const text = JSON.stringify(payload, null, 1) + '\n'
+    try {
+      const outcome = await this.ctx.fs.writeText(
+        resolved.target,
+        text,
+        baseVersion === undefined || baseVersion === ''
+          ? undefined
+          : { kind: 'replaceIfVersion', version: baseVersion as FsVersion },
+        undefined,
+        scope.policy,
+      )
+      return { version: String(outcome.version) }
+    } catch (error) {
+      return fsFailure(error, { code: 'write-failed', message: `cannot write ${path}` })
+    }
   }
 
   /**
-   * Read one workspace file's raw bytes (markdown image srcs in cells).
-   * Gated and traversal-guarded; the bytes go out with the derived mime so
-   * an <img> can load them.
+   * Replace a file with a fresh one-cell notebook. Used when a `.ipynb` is
+   * not parseable and the user explicitly chooses to start over.
    */
-  async readRaw(root: string, rel: string): Promise<{ data: Buffer; mime: string; size: number } | JupyterError> {
-    const gated = await this.gate(root)
-    if (!gated.ok) return gated.error
-    if (isGitPath(rel)) return { code: 'path-outside-root', message: 'refusing to read .git' }
-    const resolved = await resolveInsideRoot(gated.canonical, rel)
+  async create(scope: NotebookScope, path: string, overwrite: boolean): Promise<NotebookView | JupyterError> {
+    const resolved = await resolveFile(this.ctx, scope, path)
     if (!resolved.ok) return resolved.error
-    let data: Buffer
-    let info: Awaited<ReturnType<typeof stat>>
+    const view = emptyNotebook(path, '')
+    const payload = serializeNotebook({ cells: view.cells, metadata: view.metadata })
+    const text = JSON.stringify(payload, null, 1) + '\n'
     try {
-      info = await stat(resolved.abs)
-    } catch {
-      return { code: 'not-found', message: `cannot read ${rel}` }
-    }
-    if (info.isDirectory()) return { code: 'not-found', message: `${rel} is a directory` }
-    try {
-      data = await readFile(resolved.abs)
-    } catch {
-      return { code: 'not-found', message: `cannot read ${rel}` }
-    }
-    return { data, mime: mimeOf(rel), size: data.length }
-  }
-
-  /** Read and parse one notebook file. */
-  async read(root: string, rel: string): Promise<NotebookView | JupyterError> {
-    const gated = await this.gate(root)
-    if (!gated.ok) return gated.error
-    if (isGitPath(rel)) return { code: 'path-outside-root', message: 'refusing to read .git' }
-    const resolved = await resolveInsideRoot(gated.canonical, rel)
-    if (!resolved.ok) return resolved.error
-    let data: Buffer
-    let info: Awaited<ReturnType<typeof stat>>
-    try {
-      info = await stat(resolved.abs)
-    } catch {
-      return { code: 'not-found', message: `cannot stat ${rel}` }
-    }
-    if (info.isDirectory()) return { code: 'not-found', message: `${rel} is a directory` }
-    if (info.size > NOTEBOOK_CAP_BYTES) return { code: 'not-notebook', message: 'notebook exceeds read cap' }
-    try {
-      data = await readFile(resolved.abs)
-    } catch {
-      return { code: 'not-found', message: `cannot read ${rel}` }
-    }
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(data.toString('utf8')) as unknown
-    } catch {
-      return { code: 'not-notebook', message: `${rel} is not valid JSON` }
-    }
-    const result = parseNotebook(parsed)
-    if ('code' in result) return result
-    return {
-      path: rel,
-      cells: result.cells.map((cell) => ({ ...cell, path: rel })),
-      metadata: result.metadata,
-      mtime: info.mtimeMs,
+      const outcome = await this.ctx.fs.writeText(
+        resolved.target,
+        text,
+        overwrite ? undefined : { kind: 'createIfAbsent' },
+        undefined,
+        scope.policy,
+      )
+      return { ...view, version: String(outcome.version) }
+    } catch (error) {
+      return fsFailure(error, { code: 'write-failed', message: `cannot create ${path}` })
     }
   }
 
-  /** Write the notebook back, refusing when the file moved on disk. */
-  async write(
-    root: string,
-    rel: string,
-    value: unknown,
-    baseMtime?: number,
-  ): Promise<{ mtime: number } | JupyterError> {
-    const gated = await this.gate(root)
-    if (!gated.ok) return gated.error
-    if (isGitPath(rel)) return { code: 'path-outside-root', message: 'refusing to touch .git' }
-    const resolved = await resolveInsideRoot(gated.canonical, rel)
+  /** Read a plain UTF-8 file for the text editor. */
+  async readTextFile(scope: NotebookScope, path: string): Promise<TextFileView | JupyterError> {
+    const resolved = await resolveFile(this.ctx, scope, path)
     if (!resolved.ok) return resolved.error
-    const parsed = parseNotebook(value)
-    if ('code' in parsed) return parsed
-    const payload = serializeNotebook({ cells: parsed.cells, metadata: parsed.metadata })
     try {
-      let current: Awaited<ReturnType<typeof stat>>
-      try {
-        current = await stat(resolved.abs)
-      } catch {
-        current = { mtimeMs: 0 } as Awaited<ReturnType<typeof stat>>
+      const info = await this.ctx.fs.stat(resolved.target)
+      if (info === undefined || info.type !== 'file') return { code: 'not-found', message: `not a file: ${path}` }
+      if (info.size !== undefined && info.size > TEXT_CAP_BYTES) {
+        return { code: 'not-text', message: 'file exceeds the text editor size cap' }
       }
-      if (baseMtime !== undefined && Number(current.mtimeMs) !== 0 && Math.abs(Number(current.mtimeMs) - baseMtime) > 1) {
-        return { code: 'write-conflict', message: 'file changed on disk since it was loaded' }
-      }
-      await mkdir(dirname(resolved.abs), { recursive: true })
-      await writeFile(resolved.abs, JSON.stringify(payload, null, 1) + '\n', 'utf8')
-      const info = await stat(resolved.abs)
-      return { mtime: info.mtimeMs }
-    } catch {
-      return { code: 'write-failed', message: `cannot write ${rel}` }
+      const raw = await this.ctx.fs.readText(resolved.target)
+      const text = raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw
+      return { path, text, version: String(info.version) }
+    } catch (error) {
+      return fsFailure(error, { code: 'not-found', message: `cannot read ${path}` })
     }
   }
 
-  /** Recursively list *.ipynb files under the root (pruned at noise dirs). */
-  async listNotebooks(root: string): Promise<{ path: string; name: string }[] | JupyterError> {
-    const gated = await this.gate(root)
-    if (!gated.ok) return gated.error
-    const hits: { path: string; name: string }[] = []
-    let scanned = 0
-    let truncated = false
-    const walk = async (rel: string, depth: number): Promise<void> => {
-      if (truncated) return
-      const resolved = await resolveInsideRoot(gated.canonical, rel)
-      if (!resolved.ok) return
-      let dirents: Dirent[]
-      try {
-        dirents = await readdir(resolved.abs, { withFileTypes: true })
-      } catch {
-        return
-      }
-      for (const entry of dirents) {
-        if (scanned >= LIST_SCAN_CAP) {
-          truncated = true
-          return
-        }
-        scanned += 1
-        const entryName = entry.name
-        const path = rel === '' ? entryName : `${rel}/${entryName}`
-        if (entry.isDirectory()) {
-          if (LIST_SKIP_DIRS.has(entryName)) continue
-          if (depth < 24 && !truncated) await walk(path, depth + 1)
-          continue
-        }
-        if (entryName.toLowerCase().endsWith('.ipynb')) {
-          if (hits.length >= LIST_HIT_CAP) {
-            truncated = true
-            return
-          }
-          hits.push({ path, name: entryName })
-        }
-      }
-    }
+  /** Write a plain UTF-8 file with the version guard and Session policy. */
+  async writeTextFile(
+    scope: NotebookScope,
+    path: string,
+    text: string,
+    baseVersion: string | undefined,
+  ): Promise<{ version: string } | JupyterError> {
+    if (text.length > TEXT_CAP_BYTES) return { code: 'not-text', message: 'file exceeds the text editor size cap' }
+    const resolved = await resolveFile(this.ctx, scope, path)
+    if (!resolved.ok) return resolved.error
     try {
-      await walk('', 0)
-    } catch {
-      return { code: 'internal', message: 'listing walk failed' }
+      const outcome = await this.ctx.fs.writeText(
+        resolved.target,
+        text,
+        baseVersion === undefined || baseVersion === ''
+          ? undefined
+          : { kind: 'replaceIfVersion', version: baseVersion as FsVersion },
+        undefined,
+        scope.policy,
+      )
+      return { version: String(outcome.version) }
+    } catch (error) {
+      return fsFailure(error, { code: 'write-failed', message: `cannot write ${path}` })
     }
-    hits.sort((a, b) => (a.path < b.path ? -1 : 1))
-    return hits
+  }
+
+  /** Read raw bytes beside the notebook (markdown images). */
+  async readRaw(scope: NotebookScope, path: string): Promise<{ data: Uint8Array; mime: string } | JupyterError> {
+    const resolved = await resolveFile(this.ctx, scope, path)
+    if (!resolved.ok) return resolved.error
+    try {
+      const info = await this.ctx.fs.stat(resolved.target)
+      if (info === undefined || info.type !== 'file') return { code: 'not-found', message: `not a file: ${path}` }
+      if (info.size !== undefined && info.size > RAW_CAP_BYTES) {
+        return { code: 'not-found', message: 'file exceeds the size cap' }
+      }
+      const data = await this.ctx.fs.readBytes(resolved.target, undefined, RAW_CAP_BYTES)
+      return { data, mime: mimeOf(path) }
+    } catch (error) {
+      return fsFailure(error, { code: 'not-found', message: `cannot read ${path}` })
+    }
   }
 }

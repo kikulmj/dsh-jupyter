@@ -1,25 +1,21 @@
 /**
- * @dsh-local/dsh-jupyter — host half: the workspace-gated notebook fs
- * service and the /dsh-jupyter/* HTTP routes (read/write/list + NDJSON
- * streaming cell execution through a real Jupyter kernel bridge), plus the
- * left-edge Web terminal (/dsh-terminal/*: a real node-pty shell per
- * browser session, streamed as NDJSON) on the shared webserver. The browser
- * half (exports "./client") is served by client-modules from the same
- * package's dsh.client declaration.
+ * @dsh-local/dsh-jupyter — host half: the Session-scoped notebook file
+ * service and the /dsh-jupyter/* HTTP routes (read/write/raw + NDJSON
+ * streaming cell execution through the Python bridge) on the shared
+ * webserver. The browser half (exports "./client") registers the notebook as a
+ * native right-sidebar tab type for `.ipynb` files.
  *
  * The host half also announces the plugin to every agent through the
- * system-prompt section mechanism, so agents know the notebook panel and the
- * terminal exist and how to cooperate with them.
+ * system-prompt section mechanism.
  * @module @dsh-local/dsh-jupyter
  */
 import type { Context } from '@deepseek-ai/cordis';
-/** Required services: the route registry, the managed subprocess seam, the workspace registry, and the prompt band. */
+/** Required services: routes, managed subprocesses, filesystem, sessions, sandbox policy, and the prompt band. */
 export declare const inject: string[];
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
 export declare const JUPYTER_GUIDANCE: string;
 /**
- * Mount the notebook data services and their routes, plus the terminal PTY
- * registry and its routes.
- * @param ctx - context carrying webServer, subprocess, workspaceRegistry, systemPrompt.
+ * Mount the notebook services and routes.
+ * @param ctx - context carrying webServer, subprocess, fs, sessions, systemPrompt.
  */
 export declare function apply(ctx: Context): void;

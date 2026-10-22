@@ -1,10 +1,11 @@
 {
   "name": "@dsh-local/dsh-jupyter",
-  "description": "Jupyter notebook (.ipynb) preview, edit and run for the dsh web GUI — a right-side notebook panel (cell editing, markdown/code/raw cells, rich output rendering) plus a left-edge real Web terminal (node-pty PTY, TERM=xterm-256color, xterm.js): driven by host-side fs routes, a real Jupyter kernel bridge, and a PTY session manager, with agent-facing execution capability. Hot-pluggable via a profile bundle patch — no dsh source changes.",
-  "version": "0.1.0",
+  "description": "Jupyter notebook (.ipynb) viewer, editor and runner for the dsh web GUI: a native right-sidebar tab type driven by the host filesystem service, with a stdlib-only Python kernel bridge that uses dsh's bundled Python. No native dependencies.",
+  "version": "0.2.0",
   "type": "module",
   "engines": {
-    "node": "^22.19.0 || >=24.0.0"
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": ">=0.2.0-0"
   },
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -14,7 +15,7 @@
       "default": "./lib/index.js"
     },
     "./client": {
-      "types": "./lib/types/client/index.d.ts",
+      "types": "./lib/types-client/client/index.d.ts",
       "default": "./lib/client.js"
     },
     "./src/*": "./src/*",
@@ -26,41 +27,45 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-locale"
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
       ],
       "platform": "web"
     }
   },
-  "dependencies": {
-    "node-pty": "^1.1.0"
-  },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-workspace": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/dsh-client-locale": ">=0.2.0-0",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.2.0-0",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": ">=0.2.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.2.0-0",
+    "@deepseek-ai/dsh-fs": ">=0.2.0-0",
+    "@deepseek-ai/dsh-host-webserver": ">=0.2.0-0",
+    "@deepseek-ai/dsh-sandbox-policy": ">=0.2.0-0",
+    "@deepseek-ai/dsh-session": ">=0.2.0-0",
+    "@deepseek-ai/dsh-subprocess": ">=0.2.0-0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.0-0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-workspace": "^0.1.0-rc.6",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-client-locale": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-store": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sandbox-policy": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-subprocess": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "^18.3.5",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "0.22.2",
@@ -74,7 +79,7 @@
   ],
   "license": "Apache-2.0",
   "scripts": {
-    "build": "node scripts/gen-xterm-css.mjs && tsc -b tsconfig.host.json tsconfig.client.json && tsdown && node scripts/copy-assets.mjs",
+    "build": "tsc -b tsconfig.host.json tsconfig.client.json && tsdown && node scripts/copy-assets.mjs",
     "typecheck": "tsc -b tsconfig.host.json tsconfig.client.json --pretty false"
   }
 }

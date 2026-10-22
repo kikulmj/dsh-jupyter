@@ -1,18 +1,20 @@
 /**
- * Notebook editor component — the content injected into the built-in preview
- * column. It opens a .ipynb (path prop), edits code/markdown/raw cells, saves
- * back through the host routes, and runs cells through the shared kernel
- * bridge (streaming outputs). Visual language mirrors the built-in preview
- * panel (--aion-* tokens).
+ * Notebook editor component — the body of the native `.ipynb` right-sidebar
+ * tab. It edits code/markdown/raw cells, saves back through the host routes,
+ * and runs cells through the shared kernel bridge (streaming outputs). Visual
+ * language follows the product's theme tokens (`--dsw-*`).
  * @module dsh-jupyter/client/panel
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { NbCell, NbOutput, NotebookView } from '../core/types.ts'
-import type { JupyterApi } from './api.ts'
+import { fileOf } from './address.ts'
+import { JupyterApi } from './api.ts'
+import { CodeEditor } from './code-editor.tsx'
 import { renderMarkdown, resolveMarkdownImage } from './markdown.ts'
-import { t } from './locales.ts'
 
 /** One cell's runtime state (transient, not persisted). */
 interface CellRuntime {
@@ -24,74 +26,97 @@ interface CellRuntime {
 /** The kernel connection state shown in the toolbar. */
 type KernelState = 'idle' | 'busy' | 'error'
 
+/** The notebook editor (the body of one `.ipynb` tab). */
+export interface NotebookPanelProps {
+  /** The Session that authorizes file access (injected by the tab seat). */
+  sessionId: string
+  /** The tab's live information hook (body seat). */
+  useTabInfo: UseSidebarRightTabInfo
+  /** Copy for this plugin's locale namespace. */
+  t: TranslateNS<'dsh-jupyter'>
+}
+
 /** Build a resolveImageSrc for markdown cells (raw route serves workspace files). */
-function imageResolver(root: string, notebookPath: string, src: string): string | null {
-  if (root === '' || notebookPath === '') return null
+function imageResolver(api: JupyterApi, sessionId: string, notebookPath: string, src: string): string | null {
+  if (notebookPath === '') return null
   const resolution = resolveMarkdownImage(notebookPath, src)
   if (resolution.kind === 'absolute') return src
   if (resolution.kind === 'escape') return null
-  return `/dsh-jupyter/raw?root=${encodeURIComponent(root)}&path=${encodeURIComponent(resolution.path)}${resolution.suffix}`
+  return api.rawUrl(sessionId, resolution.path, resolution.suffix)
 }
 
 /**
- * The notebook editor (embedded in the preview column).
- * @param root - the active workspace root (from the current session cwd).
- * @param api - the /dsh-jupyter API client.
- * @param path - the notebook path to open (null = empty state).
+ * The notebook editor (the body of one `.ipynb` tab).
+ * @param sessionId - the Session that authorizes file access.
+ * @param useTabInfo - the tab's live information hook.
+ * @param t - copy for this plugin's locale namespace.
  */
-export function NotebookPanel({
-  root,
-  api,
-  path,
-}: {
-  root: string
-  api: JupyterApi
-  path: string | null
-}): JSX.Element {
+export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps): JSX.Element {
+  const { tab } = useTabInfo()
+  const path = useMemo(() => fileOf(tab.contentId)?.path ?? '', [tab.contentId])
+  const api = useMemo(() => new JupyterApi(), [])
   const [notebook, setNotebook] = useState<NotebookView | null>(null)
   const [runtime, setRuntime] = useState<Record<string, CellRuntime>>({})
   const [kernelState, setKernelState] = useState<KernelState>('idle')
   const [status, setStatus] = useState<string>('')
   const [statusError, setStatusError] = useState(false)
+  const [statusCode, setStatusCode] = useState<string | undefined>(undefined)
   const [saving, setSaving] = useState(false)
   const runSeq = useRef(0)
+  const loadSeq = useRef(0)
   /** The id of the most recently added cell — drives auto-focus into the fresh
    *  textarea so typing can start immediately (Jupyter-style). */
   const lastAddedIdRef = useRef<string | null>(null)
 
-  // Open the requested notebook; a path change reloads it.
-  useEffect(() => {
-    if (root === '' || path === null || path === '') {
+  /** Reload the notebook from disk (also the sidebar refresh command). */
+  const reload = useCallback(async (): Promise<void> => {
+    const seq = ++loadSeq.current
+    if (path === '') {
       setNotebook(null)
       setRuntime({})
       lastAddedIdRef.current = null
       return
     }
-    let cancelled = false
-    setNotebook(null)
-    void api.read(root, path).then((result) => {
-      if (cancelled) return
-      if (!result.ok) {
-        setStatus(result.error.message)
-        setStatusError(true)
-        setNotebook(null)
-        return
-      }
-      setNotebook(result.value)
-      setRuntime({})
-      setKernelState('idle')
-      setStatus('')
-      setStatusError(false)
-      lastAddedIdRef.current = null
-    })
-    return () => {
-      cancelled = true
+    const result = await api.read(sessionId, path, tab.signal)
+    if (seq !== loadSeq.current || tab.signal.aborted) return
+    if (!result.ok) {
+      setStatus(result.error.message)
+      setStatusError(true)
+      setStatusCode(result.error.code)
+      setNotebook(null)
+      return
     }
-  }, [root, path, api])
+    setNotebook(result.value)
+    setRuntime({})
+    setKernelState('idle')
+    setStatus('')
+    setStatusError(false)
+    setStatusCode(undefined)
+    lastAddedIdRef.current = null
+  }, [api, path, sessionId, tab.signal])
+
+  // Open the requested notebook; a path change reloads it.
+  useEffect(() => {
+    setNotebook(null)
+    void reload()
+  }, [reload])
+
+  // The sidebar's refresh command reloads from disk without remounting.
+  useEffect(() => tab.actions.bindCommands({ refresh: () => void reload() }), [tab.actions, reload])
+
+  // Closing the tab ends its kernel; switching tabs or closing the sidebar
+  // does not abort this signal (the body stays mounted).
+  useEffect(() => {
+    if (path === '') return
+    const release = (): void => { void api.dispose(sessionId, path) }
+    tab.signal.addEventListener('abort', release, { once: true })
+    return () => tab.signal.removeEventListener('abort', release)
+  }, [api, sessionId, path, tab.signal])
 
   const flashStatus = useCallback((message: string, isError = false): void => {
     setStatus(message)
     setStatusError(isError)
+    setStatusCode(undefined)
     const seq = ++runSeq.current
     setTimeout(() => {
       if (runSeq.current === seq) setStatus('')
@@ -103,19 +128,35 @@ export function NotebookPanel({
     setRuntime((prev) => ({ ...prev, [cellId]: { ...(prev[cellId] ?? { editing: false, running: false, error: null }), ...patch } }))
   }, [])
 
-  /** Save the notebook back (mtime conflict checked host-side). */
+  /** Save the notebook back (filesystem version checked host-side). */
   const save = useCallback(async (): Promise<void> => {
-    if (notebook === null || root === '') return
+    if (notebook === null || path === '') return
     setSaving(true)
-    const result = await api.write(root, notebook.path, { cells: notebook.cells, metadata: notebook.metadata }, notebook.mtime)
+    const result = await api.write(sessionId, path, { cells: notebook.cells, metadata: notebook.metadata }, notebook.version)
     setSaving(false)
     if (!result.ok) {
       flashStatus(result.error.message, true)
       return
     }
-    setNotebook((prev) => (prev === null ? prev : { ...prev, mtime: result.value.mtime }))
+    setNotebook((prev) => (prev === null ? prev : { ...prev, version: result.value.version }))
     flashStatus(t('saved'))
-  }, [notebook, root, api, flashStatus])
+  }, [notebook, path, sessionId, api, flashStatus, t])
+
+  /** Replace a non-notebook file with a fresh notebook after confirmation. */
+  const openAsEmpty = useCallback(async (): Promise<void> => {
+    if (path === '' || !window.confirm(t('createEmptyConfirm'))) return
+    const result = await api.create(sessionId, path, true)
+    if (!result.ok) {
+      flashStatus(result.error.message, true)
+      return
+    }
+    setNotebook(result.value)
+    setRuntime({})
+    setStatus('')
+    setStatusError(false)
+    setStatusCode(undefined)
+    lastAddedIdRef.current = null
+  }, [api, path, sessionId, flashStatus, t])
 
   /** Update one cell's source in the notebook. */
   const editCell = useCallback((cellId: string, source: string): void => {
@@ -127,7 +168,7 @@ export function NotebookPanel({
 
   /** Run one code cell through the kernel bridge. */
   const runCell = useCallback(async (cell: NbCell): Promise<void> => {
-    if (notebook === null || root === '') return
+    if (notebook === null || path === '') return
     patchRuntime(cell.id, { running: true, error: null })
     setKernelState('busy')
     // Clear prior outputs, stream new ones in.
@@ -136,7 +177,7 @@ export function NotebookPanel({
       cells: prev.cells.map((c) => (c.id === cell.id ? { ...c, outputs: [], execution_count: null } : c)),
     }))
     try {
-      const result = await api.execute(root, notebook.path, cell.id, cell.source, (output) => {
+      const result = await api.execute(sessionId, path, cell.id, cell.source, (output) => {
         setNotebook((prev) => (prev === null ? prev : {
           ...prev,
           cells: prev.cells.map((c) => (c.id === cell.id ? { ...c, outputs: [...c.outputs, output] } : c)),
@@ -154,7 +195,7 @@ export function NotebookPanel({
     } finally {
       setKernelState('idle')
     }
-  }, [notebook, root, api, flashStatus, patchRuntime])
+  }, [notebook, path, sessionId, api, flashStatus, patchRuntime, t])
 
   /** Run every code cell in order. */
   const runAll = useCallback(async (): Promise<void> => {
@@ -168,16 +209,16 @@ export function NotebookPanel({
 
   /** Restart the kernel (fresh state). */
   const restartKernel = useCallback(async (): Promise<void> => {
-    if (notebook === null || root === '') return
-    const result = await api.restart(root, notebook.path)
+    if (notebook === null || path === '') return
+    const result = await api.restart(sessionId, path)
     flashStatus(result.ok ? t('kernelRestarted') : result.error.message, !result.ok)
-  }, [notebook, root, api, flashStatus])
+  }, [notebook, path, sessionId, api, flashStatus, t])
 
   /** Interrupt the running cell. */
   const interrupt = useCallback(async (): Promise<void> => {
-    if (notebook === null || root === '') return
-    await api.interrupt(root, notebook.path)
-  }, [notebook, root, api])
+    if (notebook === null || path === '') return
+    await api.interrupt(sessionId, path)
+  }, [notebook, path, sessionId, api])
 
   /** Add a cell after the given index. */
   const addCell = useCallback((afterIndex: number, cellType: NbCell['cell_type']): void => {
@@ -242,8 +283,10 @@ export function NotebookPanel({
     })
   }, [])
 
-  // Keyboard: Cmd/Ctrl+S saves.
+  // Keyboard: Cmd/Ctrl+S saves, only for the foreground tab (bodies stay
+  // mounted in the background).
   useEffect(() => {
+    if (!tab.visible) return
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's' && notebook !== null) {
         event.preventDefault()
@@ -252,7 +295,7 @@ export function NotebookPanel({
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [notebook, save])
+  }, [notebook, save, tab.visible])
 
   const renderedCells = useMemo(() => {
     return (notebook?.cells ?? []).map((cell, index) => {
@@ -264,8 +307,10 @@ export function NotebookPanel({
           index={index}
           total={notebook?.cells.length ?? 0}
           runtime={rt}
-          root={root}
+          sessionId={sessionId}
+          api={api}
           autoFocus={cell.id === lastAddedIdRef.current}
+          t={t}
           onEdit={(source) => editCell(cell.id, source)}
           onRun={() => void runCell(cell)}
           onDelete={() => deleteCell(cell.id)}
@@ -276,7 +321,7 @@ export function NotebookPanel({
         />
       )
     })
-  }, [notebook, runtime, root, editCell, runCell, deleteCell, moveCell, toggleEditing, addCell])
+  }, [notebook, runtime, sessionId, api, editCell, runCell, deleteCell, moveCell, toggleEditing, addCell])
 
   return (
     <div className="dshj-editor">
@@ -308,9 +353,23 @@ export function NotebookPanel({
 
       {notebook === null ? (
         <div className="dshj-empty">
-          <div className="dshj-md">
-            <div className="dshj-md-body">{t('emptyHint')}</div>
-          </div>
+          {statusError ? (
+            <div className="dshj-empty-error">
+              <div className="dshj-md-body">{status}</div>
+              <div className="dshj-empty-actions">
+                <button type="button" className="dshj-toolbar-btn" onClick={() => void reload()}>
+                  {t('reload')}
+                </button>
+                {statusCode === 'not-notebook' && (
+                  <button type="button" className="dshj-toolbar-btn primary" onClick={() => void openAsEmpty()}>
+                    {t('createEmpty')}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="dshj-md-body">{t('loading')}</div>
+          )}
         </div>
       ) : (
         <div className="dshj-cells">{renderedCells}</div>
@@ -329,8 +388,10 @@ function CellCard({
   index,
   total,
   runtime,
-  root,
+  sessionId,
+  api,
   autoFocus,
+  t,
   onEdit,
   onRun,
   onDelete,
@@ -343,9 +404,11 @@ function CellCard({
   index: number
   total: number
   runtime: CellRuntime
-  root: string
+  sessionId: string
+  api: JupyterApi
   /** The cell was just added — its textarea should grab focus (edit mode). */
   autoFocus: boolean
+  t: TranslateNS<'dsh-jupyter'>
   onEdit: (source: string) => void
   onRun: () => void
   onDelete: () => void
@@ -359,8 +422,8 @@ function CellCard({
   const editing = runtime.editing || (isMarkdown && cell.source === '')
   const mdHtml = useMemo(() => {
     if (!isMarkdown) return ''
-    return renderMarkdown(cell.source, { resolveImageSrc: (src) => imageResolver(root, cell.path ?? '', src) })
-  }, [cell, isMarkdown, root])
+    return renderMarkdown(cell.source, { resolveImageSrc: (src) => imageResolver(api, sessionId, cell.path ?? '', src) })
+  }, [cell, isMarkdown, api, sessionId])
 
   return (
     <div className={`dshj-cell${runtime.running ? ' running' : ''}`}>
@@ -389,8 +452,7 @@ function CellCard({
 
       <div className="dshj-cell-body">
         {isCode ? (
-          <AutoGrowTextarea
-            className="dshj-source"
+          <CodeEditor
             value={cell.source}
             autoFocus={autoFocus}
             onChange={(source) => onEdit(source)}
@@ -438,7 +500,7 @@ function CellCard({
         {isCode && cell.outputs.length > 0 && (
           <div className="dshj-outputs">
             {cell.outputs.map((output, outputIndex) => (
-              <OutputView key={outputIndex} output={output} />
+              <OutputView key={outputIndex} output={output} t={t} />
             ))}
           </div>
         )}
@@ -446,6 +508,7 @@ function CellCard({
     </div>
   )
 }
+
 
 /**
  * A textarea whose height follows its content (auto-grow). A fixed pixel
@@ -513,7 +576,7 @@ function AutoGrowTextarea({
 }
 
 /** Render one nbformat output. */
-function OutputView({ output }: { output: NbOutput }): JSX.Element {
+function OutputView({ output, t }: { output: NbOutput; t: TranslateNS<'dsh-jupyter'> }): JSX.Element {
   if (output.output_type === 'stream') {
     return (
       <div className={`dshj-output dshj-output-stream${output.name === 'stderr' ? ' stderr' : ''}`}>
