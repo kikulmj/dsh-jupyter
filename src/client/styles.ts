@@ -58,6 +58,23 @@ export const PANEL_CSS = `
   flex: 1;
 }
 
+.dshj-interpreter {
+  height: 22px;
+  max-width: 150px;
+  margin-left: 8px;
+  padding: 0 4px;
+  border: 1px solid var(--dsw-alias-border-l1, #e5e6eb);
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-base, #ffffff);
+  color: var(--dsw-alias-label-secondary, #454d5f);
+  font-family: inherit;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.dshj-interpreter:disabled {
+  opacity: 0.5;
+}
+
 .dshj-path-badge {
   font-size: 11px;
   color: var(--dsw-alias-label-tertiary, #86909c);

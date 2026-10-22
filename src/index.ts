@@ -34,7 +34,7 @@ export const JUPYTER_GUIDANCE = '本机已安装 dsh-jupyter 插件（Jupyter no
   + '可编辑 code/markdown/raw 单元格、增删排序单元格、保存回磁盘（带磁盘版本冲突检查）。'
   + '代码单元格由宿主进程的 Python 内核执行（使用 dsh 自带 Python，内核状态在单元格间共享），'
   + '流式渲染 stdout/stderr、HTML、Markdown、PNG/JPEG/SVG 图片、JSON 和错误回溯，支持中断与重启内核；'
-  + '支持 !命令、%pip、%cd、%pwd 等常用行内魔法（不支持 input() 和 %% 单元格魔法）。'
+  + '支持 !命令、%pip、%cd、%pwd 等常用行内魔法（不支持 input() 和 %% 单元格魔法）；工具栏「内核环境」可选择 dsh 自带 Python 或 ~/.conda/environments.txt 中的 conda 环境，切换会重启内核，而 !conda activate 不会改变内核。'
   + '插件也接管常见代码/配置文件（.py/.js/.ts/.json/.yaml/.txt 等）的右侧标签页编辑与保存；markdown/HTML/图片/Office 仍由官方预览处理。'
   + '宿主端经 /dsh-jupyter/* 路由提供，所有读写都按 Session 工作区做边界检查并走统一的文件系统/沙箱策略。'
   + '用户提到「jupyter / notebook / .ipynb / 笔记本单元格 / 运行单元格」时即指本插件，请据此协作；执行会真实消耗本机资源，先确认再操作。'

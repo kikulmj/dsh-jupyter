@@ -77,7 +77,8 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
-    "docs"
+    "docs",
+    "examples"
   ],
   "license": "Apache-2.0",
   "scripts": {

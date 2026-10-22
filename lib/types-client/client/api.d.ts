@@ -3,9 +3,17 @@
  * decode the shared envelope; execute streams NDJSON lines through a reader.
  * @module dsh-jupyter/client/api
  */
-import type { JupyterError, NotebookView, NbCell, NbOutput, TextFileView } from '../core/types.ts';
+import type { InterpreterOption, JupyterError, NotebookView, NbCell, NbOutput, TextFileView } from '../core/types.ts';
 /** The typed API surface the panel drives. */
 export declare class JupyterApi {
+    /** List the Python interpreters the kernel picker offers. */
+    interpreters(signal?: AbortSignal): Promise<{
+        ok: true;
+        value: InterpreterOption[];
+    } | {
+        ok: false;
+        error: JupyterError;
+    }>;
     /** Read and parse a notebook file. */
     read(sessionId: string, path: string, signal?: AbortSignal): Promise<{
         ok: true;
@@ -89,7 +97,7 @@ export declare class JupyterApi {
      * Execute one cell, streaming output events.
      * @returns a promise resolving with the done event; rejects on transport failure.
      */
-    execute(sessionId: string, path: string, cellId: string, code: string, onOutput: (output: NbOutput) => void): Promise<{
+    execute(sessionId: string, path: string, cellId: string, code: string, onOutput: (output: NbOutput) => void, python?: string): Promise<{
         executionCount: number | null;
         status: 'ok' | 'error';
     }>;

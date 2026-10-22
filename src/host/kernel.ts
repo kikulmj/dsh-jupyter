@@ -18,7 +18,7 @@ import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessHandle } from '@deepseek-ai/dsh-subprocess'
 import type { NbOutput } from '../core/types.ts'
-import { resolvePython } from './python.ts'
+import { condaEnvFor, resolvePython } from './python.ts'
 
 /** Line-buffer a readable stream, yielding complete lines (newline-stripped). */
 async function* lines(readable: Readable): AsyncGenerator<string> {
@@ -80,6 +80,8 @@ export class KernelSession {
     private readonly bridgeScript: string,
     private readonly scope: { sessionId: string; root: string },
     private readonly path: string,
+    /** The interpreter selected for this notebook; undefined means bundled. */
+    readonly python: string | undefined,
   ) {}
 
   /** The canonical notebook identity this session is bound to. */
@@ -179,7 +181,7 @@ export class KernelSession {
   }
 
   private async startBridge(): Promise<void> {
-    const python = await resolvePython(this.ctx)
+    const python = this.python ?? await resolvePython(this.ctx)
     // Resolve through the composed filesystem so the bridge runs in the
     // notebook's real directory (sandbox path included) and never outside the
     // Session workspace.
@@ -191,6 +193,7 @@ export class KernelSession {
     // Relative imports and data files then behave like a real Jupyter session.
     const cwd = dirname(this.ctx.fs.processPath(target))
     if (this.shutdownRequested) throw new Error('kernel session closed')
+    const condaEnv = condaEnvFor(python)
     const handle = this.ctx.subprocess.spawn({
       argv: [python, this.bridgeScript, '--cwd', cwd],
       cwd,
@@ -200,6 +203,7 @@ export class KernelSession {
         stderr: { maxBytes: 64 * 1024 },
       },
       graceMs: 10_000,
+      ...condaEnv === undefined ? {} : { env: condaEnv },
     })
     this.handle = handle
     this.shutdownRequested = false
@@ -330,12 +334,18 @@ export class KernelSessionManager {
     private readonly bridgeScript: string,
   ) {}
 
-  /** Get (or lazily create) the session for one notebook. */
-  session(scope: { sessionId: string; root: string }, path: string): KernelSession {
+  /** Get (or lazily create) the session for one notebook and interpreter. */
+  session(scope: { sessionId: string; root: string }, path: string, python?: string): KernelSession {
+    const selected = python === '' ? undefined : python
     const key = `${scope.sessionId}\u0000${path}`
     let session = this.sessions.get(key)
+    if (session !== undefined && session.python !== selected) {
+      session.dispose()
+      this.sessions.delete(key)
+      session = undefined
+    }
     if (session === undefined) {
-      session = new KernelSession(this.ctx, this.bridgeScript, scope, path)
+      session = new KernelSession(this.ctx, this.bridgeScript, scope, path, selected)
       this.sessions.set(key, session)
     }
     return session

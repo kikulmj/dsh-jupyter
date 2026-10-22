@@ -27,6 +27,8 @@ export declare class KernelSession {
     private readonly bridgeScript;
     private readonly scope;
     private readonly path;
+    /** The interpreter selected for this notebook; undefined means bundled. */
+    readonly python: string | undefined;
     private handle;
     private readonly pending;
     private readonly queue;
@@ -38,7 +40,9 @@ export declare class KernelSession {
     constructor(ctx: Context, bridgeScript: string, scope: {
         sessionId: string;
         root: string;
-    }, path: string);
+    }, path: string, 
+    /** The interpreter selected for this notebook; undefined means bundled. */
+    python: string | undefined);
     /** The canonical notebook identity this session is bound to. */
     get boundPath(): string;
     /** True when a bridge process exists (started or starting). */
@@ -83,11 +87,11 @@ export declare class KernelSessionManager {
     private readonly bridgeScript;
     private readonly sessions;
     constructor(ctx: Context, bridgeScript: string);
-    /** Get (or lazily create) the session for one notebook. */
+    /** Get (or lazily create) the session for one notebook and interpreter. */
     session(scope: {
         sessionId: string;
         root: string;
-    }, path: string): KernelSession;
+    }, path: string, python?: string): KernelSession;
     /** Return an existing session without creating one (control ops on idle sessions). */
     existingSession(scope: {
         sessionId: string;

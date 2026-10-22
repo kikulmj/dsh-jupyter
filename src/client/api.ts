@@ -4,7 +4,7 @@
  * @module dsh-jupyter/client/api
  */
 
-import type { ExecuteEvent, JupyterError, NotebookView, NbCell, NbOutput, TextFileView } from '../core/types.ts'
+import type { ExecuteEvent, InterpreterOption, JupyterError, NotebookView, NbCell, NbOutput, TextFileView } from '../core/types.ts'
 
 /** Transport failure (fetch threw or the response was not readable). */
 const TRANSPORT_ERROR: JupyterError = { code: 'internal', message: 'jupyter route unavailable' }
@@ -33,6 +33,19 @@ async function post<T>(path: string, payload: unknown, signal?: AbortSignal): Pr
 
 /** The typed API surface the panel drives. */
 export class JupyterApi {
+  /** List the Python interpreters the kernel picker offers. */
+  async interpreters(signal?: AbortSignal): Promise<{ ok: true; value: InterpreterOption[] } | { ok: false; error: JupyterError }> {
+    let response: Response
+    try {
+      response = await fetch('/dsh-jupyter/interpreters', { signal })
+      const envelope = await response.json() as { ok?: boolean; value?: InterpreterOption[]; error?: JupyterError }
+      if (envelope.ok === true) return { ok: true, value: envelope.value ?? [] }
+      return { ok: false, error: envelope.error ?? TRANSPORT_ERROR }
+    } catch {
+      return { ok: false, error: TRANSPORT_ERROR }
+    }
+  }
+
   /** Read and parse a notebook file. */
   read(sessionId: string, path: string, signal?: AbortSignal): Promise<{ ok: true; value: NotebookView } | { ok: false; error: JupyterError }> {
     return post<NotebookView>('/dsh-jupyter/read', { sessionId, path }, signal)
@@ -98,13 +111,14 @@ export class JupyterApi {
     cellId: string,
     code: string,
     onOutput: (output: NbOutput) => void,
+    python?: string,
   ): Promise<{ executionCount: number | null; status: 'ok' | 'error' }> {
     let response: Response
     try {
       response = await fetch('/dsh-jupyter/execute', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ sessionId, path, cellId, code }),
+        body: JSON.stringify({ sessionId, path, cellId, code, ...python === undefined || python === '' ? {} : { python } }),
       })
     } catch {
       throw new Error('jupyter route unavailable')

@@ -33,6 +33,16 @@ export interface NotebookView {
   version: string
 }
 
+/** One Python interpreter the notebook kernel can run on. */
+export interface InterpreterOption {
+  /** Stable id (`bundled` or `conda:<path>`). */
+  id: string
+  /** Display label for the toolbar picker. */
+  label: string
+  /** Absolute path to the interpreter executable. */
+  python: string
+}
+
 /** The panel's view of a plain text file. */
 export interface TextFileView {
   /** Path relative to the session workspace root. */

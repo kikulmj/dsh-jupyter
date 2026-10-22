@@ -11,6 +11,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ExecuteEvent, JupyterEnvelope, JupyterError } from '../core/types.ts'
 import type { NotebookService } from './notebook-service.ts'
 import type { KernelSessionManager } from './kernel.ts'
+import { isKnownInterpreter, listInterpreters } from './python.ts'
 import { resolveScope, type NotebookScope } from './scope.ts'
 
 const OK = (value: unknown): JupyterEnvelope<unknown> => ({ ok: true, value })
@@ -122,6 +123,10 @@ export function registerJupyterRoutes(ctx: Context, notebooks: NotebookService, 
     }
     if (req.method === 'GET') {
       const url = new URL(req.url ?? '/', 'http://x')
+      if (url.pathname === '/dsh-jupyter/interpreters') {
+        json(res, OK(await listInterpreters(ctx)))
+        return
+      }
       if (url.pathname === '/dsh-jupyter/raw') {
         const scope = await scopeOf(ctx, res, url.searchParams.get('sessionId'))
         if (scope === undefined) return
@@ -202,12 +207,17 @@ export function registerJupyterRoutes(ctx: Context, notebooks: NotebookService, 
           json(res, FAIL(BAD_REQUEST))
           return
         }
+        const python = optionalStr(payload, 'python')
+        if (!(await isKnownInterpreter(ctx, python))) {
+          json(res, FAIL({ code: 'kernel-unavailable', message: `unknown Python interpreter: ${python ?? ''}` }))
+          return
+        }
         res.writeHead(200, {
           'content-type': 'application/x-ndjson; charset=utf-8',
           'cache-control': 'no-cache',
           connection: 'keep-alive',
         })
-        const session = kernels.session(scope, path)
+        const session = kernels.session(scope, path, python)
         try {
           const result = await session.execute(code, (output) => {
             ndjson(res, { kind: 'output', cellId, output })

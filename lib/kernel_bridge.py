@@ -38,6 +38,9 @@ import threading
 import time
 import traceback
 
+if os.name == "nt":
+    import msvcrt
+
 # Local helper names must not collide with the cell namespace. Keep them all
 # prefixed and remove the module-level globals from the user namespace.
 _ORIGINAL_STDOUT_FD = os.dup(1)
@@ -448,23 +451,57 @@ def _install_namespace_helpers() -> None:
     _NS.values["__dsh_pwd__"] = _pwd
 
 
+def _stdin_mode():
+    """Pick a non-GIL-holding way to poll fd 0.
+
+    `os.set_blocking` exists on Unix and on Windows from Python 3.12; older
+    Windows Pythons use `PeekNamedPipe` instead. A blocking pipe read holds the
+    GIL, which starves the thread executing a cell (large imports such as pandas
+    then never finish).
+    """
+    try:
+        os.set_blocking(0, False)
+        return "nonblocking", None
+    except (AttributeError, OSError, ValueError):
+        pass
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            peek = kernel32.PeekNamedPipe
+            peek.argtypes = [
+                wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+                wintypes.LPVOID, ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID,
+            ]
+            peek.restype = wintypes.BOOL
+            handle = msvcrt.get_osfhandle(0)
+
+            def available() -> int:
+                count = wintypes.DWORD(0)
+                if not peek(handle, None, 0, None, ctypes.byref(count), None):
+                    return -1
+                return int(count.value)
+
+            return "peek", available
+        except Exception:
+            pass
+    return "blocking", None
+
+
 def _read_requests(requests) -> None:
     """Reader thread: parse stdin JSON lines and serve interrupts inline.
-
-    fd 0 is non-blocking and the loop sleeps between empty reads: a blocking
-    pipe read on Windows holds the GIL, which starves the thread executing a
-    cell (large imports such as pandas then never finish).
 
     Requests go to the execution thread through a queue. Interrupts are
     delivered here directly, because the executing thread is the one that must
     keep running; the reader never executes cell code itself.
     """
-    try:
-        os.set_blocking(0, False)
-    except (OSError, ValueError):
-        pass
+    mode, available = _stdin_mode()
     buffer = b""
     while True:
+        if mode == "peek" and available is not None and available() == 0:
+            time.sleep(0.01)
+            continue
         try:
             chunk = os.read(0, 65536)
         except BlockingIOError:

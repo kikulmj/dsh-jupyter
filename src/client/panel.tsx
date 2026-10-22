@@ -10,7 +10,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { JSX } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { UseSidebarRightTabInfo } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
-import type { NbCell, NbOutput, NotebookView } from '../core/types.ts'
+import type { InterpreterOption, NbCell, NbOutput, NotebookView } from '../core/types.ts'
 import { fileOf } from './address.ts'
 import { JupyterApi } from './api.ts'
 import { CodeEditor } from './code-editor.tsx'
@@ -36,6 +36,14 @@ export interface NotebookPanelProps {
   t: TranslateNS<'dsh-jupyter'>
 }
 
+/** The interpreter path saved in the notebook's metadata (empty = bundled). */
+function savedPythonOf(metadata: Record<string, unknown>): string {
+  const section = metadata.dsh_jupyter
+  if (typeof section !== 'object' || section === null) return ''
+  const value = (section as Record<string, unknown>).python
+  return typeof value === 'string' ? value : ''
+}
+
 /** Build a resolveImageSrc for markdown cells (raw route serves workspace files). */
 function imageResolver(api: JupyterApi, sessionId: string, notebookPath: string, src: string): string | null {
   if (notebookPath === '') return null
@@ -58,6 +66,8 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
   const [notebook, setNotebook] = useState<NotebookView | null>(null)
   const [runtime, setRuntime] = useState<Record<string, CellRuntime>>({})
   const [kernelState, setKernelState] = useState<KernelState>('idle')
+  const [interpreters, setInterpreters] = useState<InterpreterOption[]>([])
+  const [python, setPython] = useState('')
   const [status, setStatus] = useState<string>('')
   const [statusError, setStatusError] = useState(false)
   const [statusCode, setStatusCode] = useState<string | undefined>(undefined)
@@ -87,6 +97,7 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
       return
     }
     setNotebook(result.value)
+    setPython(savedPythonOf(result.value.metadata))
     setRuntime({})
     setKernelState('idle')
     setStatus('')
@@ -123,6 +134,25 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
     }, 4000)
   }, [])
 
+  // Load the interpreter list once per tab.
+  useEffect(() => {
+    let cancelled = false
+    void api.interpreters(tab.signal).then((result) => {
+      if (cancelled || tab.signal.aborted || !result.ok) return
+      setInterpreters(result.value)
+    })
+    return () => { cancelled = true }
+  }, [api, tab.signal])
+
+  // A saved environment that no longer exists falls back to the bundled one.
+  useEffect(() => {
+    if (interpreters.length === 0 || python === '') return
+    if (!interpreters.some((option) => option.python === python)) {
+      setPython('')
+      flashStatus(t('interpreterUnavailable'), true)
+    }
+  }, [interpreters, python, flashStatus, t])
+
   /** Patch one cell's transient runtime state. */
   const patchRuntime = useCallback((cellId: string, patch: Partial<CellRuntime>): void => {
     setRuntime((prev) => ({ ...prev, [cellId]: { ...(prev[cellId] ?? { editing: false, running: false, error: null }), ...patch } }))
@@ -158,6 +188,25 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
     lastAddedIdRef.current = null
   }, [api, path, sessionId, flashStatus, t])
 
+  /** Switch the notebook kernel to another interpreter and restart it. */
+  const selectInterpreter = useCallback((value: string): void => {
+    if (value === python) return
+    setPython(value)
+    setKernelState('idle')
+    if (path !== '') void api.dispose(sessionId, path)
+    setNotebook((prev) => {
+      if (prev === null) return prev
+      const current = typeof prev.metadata.dsh_jupyter === 'object' && prev.metadata.dsh_jupyter !== null
+        ? prev.metadata.dsh_jupyter as Record<string, unknown>
+        : {}
+      const section = { ...current }
+      if (value === '') delete section.python
+      else section.python = value
+      return { ...prev, metadata: { ...prev.metadata, dsh_jupyter: section } }
+    })
+    flashStatus(t('interpreterChanged'))
+  }, [python, path, sessionId, api, flashStatus, t])
+
   /** Update one cell's source in the notebook. */
   const editCell = useCallback((cellId: string, source: string): void => {
     setNotebook((prev) => (prev === null ? prev : {
@@ -182,7 +231,7 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
           ...prev,
           cells: prev.cells.map((c) => (c.id === cell.id ? { ...c, outputs: [...c.outputs, output] } : c)),
         }))
-      })
+      }, python)
       setNotebook((prev) => (prev === null ? prev : {
         ...prev,
         cells: prev.cells.map((c) => (c.id === cell.id ? { ...c, execution_count: result.executionCount } : c)),
@@ -195,7 +244,7 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
     } finally {
       setKernelState('idle')
     }
-  }, [notebook, path, sessionId, api, flashStatus, patchRuntime, t])
+  }, [notebook, path, sessionId, api, python, flashStatus, patchRuntime, t])
 
   /** Run every code cell in order. */
   const runAll = useCallback(async (): Promise<void> => {
@@ -329,6 +378,18 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
         <span className="dshj-path-badge" title={path ?? ''}>
           {path ?? ''}
         </span>
+        <select
+          className="dshj-interpreter"
+          title={t('interpreter')}
+          value={python}
+          disabled={notebook === null || kernelState === 'busy'}
+          onChange={(event) => selectInterpreter(event.target.value)}
+        >
+          <option value="">{t('bundledPython')}</option>
+          {interpreters.filter((option) => option.id !== 'bundled').map((option) => (
+            <option key={option.id} value={option.python}>{option.label}</option>
+          ))}
+        </select>
         <div className="dshj-toolbar-spacer" />
         <button type="button" className="dshj-toolbar-btn primary" disabled={notebook === null || saving} onClick={() => void save()}>
           {saving ? t('saving') : t('save')}
@@ -344,6 +405,22 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
         </button>
         <button type="button" className="dshj-toolbar-btn" disabled={notebook === null} onClick={clearOutputs}>
           {t('clearOutputs')}
+        </button>
+        <button
+          type="button"
+          className="dshj-toolbar-btn"
+          disabled={notebook === null}
+          onClick={() => addCell((notebook?.cells.length ?? 0) - 1, 'code')}
+        >
+          + {t('code')}
+        </button>
+        <button
+          type="button"
+          className="dshj-toolbar-btn"
+          disabled={notebook === null}
+          onClick={() => addCell((notebook?.cells.length ?? 0) - 1, 'markdown')}
+        >
+          + {t('markdown')}
         </button>
         <span
           className={`dshj-kernel-dot ${kernelState === 'busy' ? 'busy' : kernelState === 'idle' ? 'ready' : ''}`}
@@ -370,6 +447,18 @@ export function NotebookPanel({ sessionId, useTabInfo, t }: NotebookPanelProps):
           ) : (
             <div className="dshj-md-body">{t('loading')}</div>
           )}
+        </div>
+      ) : notebook.cells.length === 0 ? (
+        <div className="dshj-empty">
+          <div className="dshj-md-body">{t('noCells')}</div>
+          <div className="dshj-empty-actions">
+            <button type="button" className="dshj-toolbar-btn primary" onClick={() => addCell(-1, 'code')}>
+              + {t('code')}
+            </button>
+            <button type="button" className="dshj-toolbar-btn" onClick={() => addCell(-1, 'markdown')}>
+              + {t('markdown')}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="dshj-cells">{renderedCells}</div>
