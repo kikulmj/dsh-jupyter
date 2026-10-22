@@ -40,8 +40,12 @@ const TEXT_PATTERNS = [
   '*.go', '*.rs', '*.rb', '*.php', '*.lua', '*.r', '*.swift', '*.kt', '*.kts', '*.scala', '*.dart',
   '*.sh', '*.bash', '*.zsh', '*.fish', '*.ps1', '*.bat', '*.cmd', '*.sql',
   '*.json', '*.jsonc', '*.yaml', '*.yml', '*.toml', '*.ini', '*.cfg', '*.conf', '*.properties', '*.env',
-  '*.txt', '*.log', '*.css', '*.scss', '*.less', '*.sass', '*.xml', '*.gradle', '*.tex',
+  '*.txt', '*.text', '*.log', '*.md', '*.markdown', '*.mdx', '*.rst', '*.adoc',
+  '*.css', '*.scss', '*.less', '*.sass', '*.xml', '*.gradle', '*.tex',
   '*.proto', '*.graphql', '*.gql',
+  'LICENSE', 'LICENCE', 'README', 'CHANGELOG', 'NOTICE', 'AUTHORS', 'CONTRIBUTING',
+  'Makefile', 'Dockerfile', 'Rakefile', 'Gemfile',
+  '.gitignore', '.gitattributes', '.editorconfig', '.npmrc', '.prettierrc', '.eslintrc',
 ]
 
 /** The tab type this plugin contributes. */

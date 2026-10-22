@@ -11,7 +11,7 @@ dsh 的 Jupyter notebook（`.ipynb`）插件：在 Web / Desktop GUI 的右侧�
 ## 功能
 
 - **原生右侧标签页**：在右侧文件树点击 `.ipynb`，与文本预览共用同一套标签系统。标签条、拖动、分栏、全屏、布局持久化、主题都由 dsh 自己提供，插件只贡献标签类型。
-- **文本/代码文件编辑**：常见代码与配置扩展名（`.py`、`.js`、`.ts`、`.json`、`.yaml`、`.toml`、`.sh`、`.sql`、`.txt`、`.css` 等）也由本插件接管，直接在右侧标签页编辑并保存；markdown、HTML、CSV、图片、PDF、Office 等仍交给官方预览，保留其更丰富的只读视图。
+- **文本/代码文件编辑**：常见代码、配置与文档扩展名（`.py`、`.js`、`.ts`、`.json`、`.yaml`、`.toml`、`.sh`、`.sql`、`.md`、`.txt`、`.css` 等）也由本插件接管，直接在右侧标签页编辑并保存；HTML、CSV、图片、PDF、Office 等仍交给官方预览，保留其更丰富的只读视图。
 - **单元格编辑**：code / markdown / raw 单元格；增删、上下移动、全选运行；markdown 预览（双击回到编辑）。
 - **高亮与缩进**：Python 语法高亮（关键字、字符串、数字、注释、内置函数、装饰器、`!` 魔法行）；Tab / Shift+Tab 缩进与反缩进；Enter 保持当前缩进，`:` 结尾自动加一级。
 - **空文件与恢复**：0 字节或纯空白的 `.ipynb` 直接按新笔记本打开；文件不是合法 notebook JSON 时显示错误和「重新加载 / 以空笔记本打开」入口。
@@ -66,6 +66,7 @@ dsh plugin --profile web add link:/path/to/dsh-jupyter
 - `~/.conda/environments.txt`（以及 `~/.anaconda/environments.txt`）中登记的 conda 环境会出现在下拉框里。选中后直接运行该环境的 `python`，并设置 `PATH` / `CONDA_PREFIX` / `CONDA_DEFAULT_ENV` 来近似 `conda activate`。
 - Desktop 自带的 Python 3.12 已包含 numpy / pandas / Pillow 等；内核桥只使用标准库，不依赖 `jupyter_client` / `ipykernel`。
 - 仅支持 Python 内核。笔记本声明的其他 kernelspec 不会切换语言，仍以 Python 执行。
+- Windows 下，`!` 命令的首个词如果是常见 POSIX 工具（`ls`、`cat`、`grep` 等），会通过已安装的 Git Bash 执行；其他命令（`dir`、`conda`）仍走 `cmd.exe`。
 
 ## 架构
 

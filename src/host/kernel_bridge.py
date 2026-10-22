@@ -31,6 +31,7 @@ import os
 import queue
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -196,6 +197,29 @@ def _unsupported_input(*_args: object, **_kwargs: object) -> str:
     raise RuntimeError("input() is not supported in the dsh-jupyter panel")
 
 
+# Commands that expect a POSIX shell on Windows. Everything else keeps cmd.exe
+# so Windows builtins (`dir`, `copy`, `conda`'s .bat wrapper) still work.
+_POSIX_COMMANDS = {
+    "ls", "cat", "grep", "pwd", "echo", "which", "find", "sed", "awk", "head", "tail",
+    "mkdir", "rmdir", "rm", "cp", "mv", "touch", "chmod", "env", "export", "unset",
+    "source", "git", "curl", "wget", "less", "more", "sort", "uniq", "wc", "diff",
+    "tar", "zip", "unzip", "ln", "du", "df", "ps", "kill", "bash", "sh", "zsh",
+}
+
+
+def _find_bash() -> str | None:
+    """Locate a POSIX shell, normalizing Git Bash's /c/... PATH form on Windows."""
+    candidate = shutil.which("bash") or shutil.which("sh")
+    if candidate is None:
+        return None
+    if os.name == "nt" and candidate.startswith("/"):
+        parts = candidate.split("/")
+        if len(parts) > 2 and len(parts[1]) == 1:
+            return parts[1].upper() + ":\\" + "\\".join(parts[2:])
+        return None
+    return candidate
+
+
 def _shell(command: str) -> None:
     """Run a shell line (`!cmd`, `%pip ...`) and forward its output."""
     command = command.strip()
@@ -211,15 +235,16 @@ def _shell(command: str) -> None:
         part[1:-1] if len(part) >= 2 and part[0] == part[-1] and part[0] in "\"'" else part
         for part in parts
     ]
-    if parts:
-        first = parts[0].lower()
-        if first in ("pip", "pip3"):
-            argv = [sys.executable, "-m", "pip", *parts[1:]]
-        elif first in ("python", "python3"):
-            argv = [sys.executable, *parts[1:]]
+    first = parts[0].lower() if parts else ""
+    if first in ("pip", "pip3"):
+        argv = [sys.executable, "-m", "pip", *parts[1:]]
+    elif first in ("python", "python3"):
+        argv = [sys.executable, *parts[1:]]
     try:
         if argv is not None:
             finished = subprocess.run(argv, capture_output=True, text=True, errors="replace")
+        elif os.name == "nt" and first in _POSIX_COMMANDS and (bash := _find_bash()) is not None:
+            finished = subprocess.run([bash, "-c", command], capture_output=True, text=True, errors="replace")
         else:
             finished = subprocess.run(command, shell=True, capture_output=True, text=True, errors="replace")
     except BaseException as error:

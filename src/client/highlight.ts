@@ -9,7 +9,7 @@ import { escapeHtml } from './markdown.ts'
 
 /** A language family the tokenizer distinguishes. */
 export type CodeLanguage =
-  | 'python' | 'javascript' | 'typescript' | 'c' | 'shell' | 'sql' | 'json' | 'yaml' | 'generic'
+  | 'python' | 'javascript' | 'typescript' | 'c' | 'shell' | 'sql' | 'json' | 'yaml' | 'generic' | 'plain'
 
 const PYTHON_KEYWORDS = new Set([
   'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue',
@@ -119,6 +119,7 @@ function readString(source: string, start: number): number {
  * @returns escaped HTML with token spans.
  */
 export function highlightCode(source: string, language: CodeLanguage = 'generic'): string {
+  if (language === 'plain') return escapeHtml(source)
   const python = language === 'python'
   const keywords = keywordsOf(language)
   const lineComment = lineCommentOf(language)
@@ -270,6 +271,8 @@ export function highlightPython(source: string): string {
 export function languageOf(path: string): CodeLanguage {
   const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : ''
+  if (ext === '') return 'plain'
+  if (['md', 'markdown', 'mdx', 'txt', 'text', 'rst', 'adoc', 'log'].includes(ext)) return 'plain'
   if (ext === 'py' || ext === 'pyw' || ext === 'pyi') return 'python'
   if (ext === 'ts' || ext === 'tsx' || ext === 'mts' || ext === 'cts') return 'typescript'
   if (ext === 'js' || ext === 'jsx' || ext === 'mjs' || ext === 'cjs' || ext === 'vue' || ext === 'svelte') return 'javascript'

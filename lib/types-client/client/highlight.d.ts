@@ -5,7 +5,7 @@
  * @module dsh-jupyter/client/highlight
  */
 /** A language family the tokenizer distinguishes. */
-export type CodeLanguage = 'python' | 'javascript' | 'typescript' | 'c' | 'shell' | 'sql' | 'json' | 'yaml' | 'generic';
+export type CodeLanguage = 'python' | 'javascript' | 'typescript' | 'c' | 'shell' | 'sql' | 'json' | 'yaml' | 'generic' | 'plain';
 /**
  * Highlight source code.
  * @param source - the file or cell source.
